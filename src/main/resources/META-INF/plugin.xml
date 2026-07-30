@@ -8,7 +8,7 @@
     <name>DataChart</name>
 
     <!-- A displayed Vendor name or Organization ID displayed on the Plugins Page. -->
-    <vendor email="support@yourcompany.com" url="https://www.yourcompany.com">YourCompany</vendor>
+    <vendor email="lerder@foxmail.com" url="https://www.yourcompany.com">MicroLight</vendor>
 
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
@@ -26,5 +26,8 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
 
+        <fileType name="dataChart" extensions="datachart;" fileNames=".datachart" language="dataChart"
+                implementationClass="com.wd.editor.DataToolsFileType"
+                fieldName="INSTANCE_C"/>
     </extensions>
 </idea-plugin>
