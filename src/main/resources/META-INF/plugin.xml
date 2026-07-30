@@ -29,5 +29,7 @@
         <fileType name="dataChart" extensions="datachart;" fileNames=".datachart" language="dataChart"
                 implementationClass="com.wd.editor.DataToolsFileType"
                 fieldName="INSTANCE_C"/>
+
+        <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
     </extensions>
 </idea-plugin>

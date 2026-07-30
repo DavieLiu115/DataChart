@@ -9,6 +9,7 @@ import com.intellij.openapi.vfs.VirtualFile;
 import com.wd.ui.DataChartView;
 import java.awt.BorderLayout;
 import java.beans.PropertyChangeListener;
+import java.beans.PropertyChangeSupport;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import org.jetbrains.annotations.NotNull;
@@ -18,9 +19,11 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	private final JPanel editorPanel;
 	private final Project project;
-	private VirtualFile file;
+	private final VirtualFile file;
 	private DataChartView dataView;
 	private volatile boolean initialized = false;
+	private boolean modified = false;
+	private final PropertyChangeSupport propertyChangeSupport = new PropertyChangeSupport(this);
 
 	public DataChartEditor(Project project, VirtualFile file) {
 		this.project = project;
@@ -37,7 +40,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 			synchronized (this) {
 				if (!initialized) {
 					dataView = new DataChartView(project);
-					editorPanel.add(dataView.getRootComponent());
+					editorPanel.add(dataView.getRootComponent(), BorderLayout.CENTER);
 					initialized = true;
 				}
 			}
@@ -67,22 +70,31 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	@Override
 	public boolean isModified() {
-		return false; // 是否被修改
+		return modified; // 返回实际修改状态
+	}
+
+	/**
+	 * 设置编辑器的修改状态，并通知 IDE
+	 */
+	public void setModified(boolean modified) {
+		boolean oldValue = this.modified;
+		this.modified = modified;
+		propertyChangeSupport.firePropertyChange(FileEditor.PROP_MODIFIED, oldValue, modified);
 	}
 
 	@Override
 	public boolean isValid() {
-		return true; // 是否有效
+		return file.isValid(); // 检查文件是否仍然有效
 	}
 
 	@Override
 	public void addPropertyChangeListener(@NotNull PropertyChangeListener listener) {
-		// 添加属性监听器（可选）
+		propertyChangeSupport.addPropertyChangeListener(listener);
 	}
 
 	@Override
 	public void removePropertyChangeListener(@NotNull PropertyChangeListener listener) {
-		// 移除属性监听器（可选）
+		propertyChangeSupport.removePropertyChangeListener(listener);
 	}
 
 	@Override
@@ -92,7 +104,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	@Override
 	public void dispose() {
-		// 清理资源（可选）
+		// 清理资源
 		editorPanel.removeAll();
 		if (dataView != null) {
 			dataView.dispose();
@@ -101,6 +113,6 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	@Override
 	public @NotNull VirtualFile getFile() {
-		return this.file; // 文件（可选）
+		return this.file;
 	}
 }

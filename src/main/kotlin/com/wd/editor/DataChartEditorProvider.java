@@ -8,12 +8,15 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
+/**
+ * @author lww
+ */
 public class DataChartEditorProvider implements FileEditorProvider, DumbAware {
 
 	@Override
 	public boolean accept(@NotNull Project project, @NotNull VirtualFile file) {
-		// 判断是否接受该文件（可以根据文件类型或其他条件）
-		return file instanceof DataChartVirtualFile;
+		// 根据文件扩展名判断是否接受该文件
+		return "datachart".equalsIgnoreCase(file.getExtension());
 	}
 
 	@Override

@@ -1,8 +1,7 @@
 package com.wd.ui;
 
 import com.intellij.openapi.project.Project;
-import com.intellij.openapi.ui.DialogWrapper;
-import javax.swing.Action;
+import java.awt.BorderLayout;
 import javax.swing.JComponent;
 import javax.swing.JPanel;
 import org.jetbrains.annotations.Nullable;
@@ -11,38 +10,26 @@ import org.jetbrains.annotations.Nullable;
  * @author lww
  * @date 2026-07-30 19:32
  */
-public class DataChartView extends DialogWrapper {
+public class DataChartView {
 
-	private JPanel rootPanel;
-	private Project project;
+	private final JPanel rootPanel;
+	private final Project project;
 
 	public DataChartView(@Nullable Project project) {
-		super(project);
 		this.project = project;
-		init();
-	}
-
-	@Override
-	public void doOKAction() {
-		// 禁用回车键的默认行为
-	}
-
-	@Override
-	protected @Nullable JComponent createCenterPanel() {
-		return rootPanel;
+		this.rootPanel = new JPanel(new BorderLayout());
+		// TODO: 在此处添加图形编辑器的具体 UI 组件（画布、工具栏等）
 	}
 
 	public JComponent getRootComponent() {
 		return rootPanel;
 	}
 
-	@Override
-	protected Action[] createActions() {
-		return new Action[0];
+	public Project getProject() {
+		return project;
 	}
 
-	@Override
 	public void dispose() {
-		super.dispose();
+		rootPanel.removeAll();
 	}
 }
