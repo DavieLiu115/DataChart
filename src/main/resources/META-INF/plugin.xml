@@ -31,5 +31,7 @@
                 fieldName="INSTANCE_C"/>
 
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
+
+        <internalFileTemplate name="DataChart 图形文件"/>
     </extensions>
 </idea-plugin>

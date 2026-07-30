@@ -25,8 +25,14 @@ public class DataToolsFileType extends LanguageFileType {
 
 	@NotNull
 	@Override
+	public String getDisplayName() {
+		return "DataChart 图形文件";
+	}
+
+	@NotNull
+	@Override
 	public String getDescription() {
-		return DataChart.LANGUAGE_NAME;
+		return "DataChart 图形数据文件";
 	}
 
 	@NotNull
