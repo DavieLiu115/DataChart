@@ -7,7 +7,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * @author pine
+ * @author lww
  */
 public class DataToolsFileType extends LanguageFileType {
 
