@@ -3,7 +3,7 @@ package com.wd.editor;
 import com.intellij.lang.Language;
 
 /**
- * @author pine
+ * @author lww
  */
 public class DataChart extends Language {
 
