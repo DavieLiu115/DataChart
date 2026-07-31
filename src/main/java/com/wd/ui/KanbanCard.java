@@ -325,8 +325,8 @@ public class KanbanCard {
 				(int) bounds.getHeight(),
 				8, 8);
 
-		// Header 文字
-		g2d.setColor(Color.WHITE);
+		// Header 文字（按主题选择颜色）
+		g2d.setColor(isDark ? HEADER_TEXT_DARK : HEADER_TEXT_LIGHT);
 		g2d.setFont(headerFont);
 		FontMetrics headerFm = g2d.getFontMetrics();
 		String headerText = name == null ? "(未命名)" : name;
@@ -420,7 +420,7 @@ public class KanbanCard {
 			headerTextX = headerLeftX + 18; // 图标和文字间距
 		}
 
-		g2d.setColor(Color.WHITE);
+		g2d.setColor(isDark ? HEADER_TEXT_DARK : HEADER_TEXT_LIGHT);
 		g2d.setFont(headerFont);
 		FontMetrics headerFm = g2d.getFontMetrics();
 		String tableName = tableInfo.getName();
@@ -428,13 +428,13 @@ public class KanbanCard {
 		int headerTextY = headerCenterY + (headerFm.getAscent() - headerFm.getDescent()) / 2;
 		g2d.drawString(tableName, headerTextX, headerTextY);
 
-		// 表注释（斜体，灰白色，与表名垂直居中）
+		// 表注释（斜体，灰白/灰色，与表名垂直居中）
 		String tableComment = tableInfo.getComment();
 		if (tableComment != null && !tableComment.isEmpty()) {
 			int commentX = headerTextX + headerFm.stringWidth(tableName) + 6;
 			int maxCommentW = (int) (bounds.getX() + bounds.getWidth() - padding - commentX);
 			g2d.setFont(italicHeaderFont);
-			g2d.setColor(new Color(255, 255, 255, 200));
+			g2d.setColor(isDark ? new Color(0xAAAAAA) : new Color(0x666666));
 			FontMetrics italicFm = g2d.getFontMetrics();
 			String commentText = "/* " + tableComment + " */";
 			g2d.drawString(truncateByWidth(commentText, maxCommentW, italicFm),
