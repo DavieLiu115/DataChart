@@ -77,7 +77,7 @@ public class KanbanBoard extends JPanel {
 	/** 表格卡片尺寸（列多，需要更高） */
 	private static final double TABLE_CARD_WIDTH = 280;
 	private static final double TABLE_CARD_ROW_HEIGHT = 18;
-	private static final double TABLE_CARD_BASE_HEIGHT = 70;
+	private static final double TABLE_CARD_BASE_HEIGHT = 60;
 
 	/** 背景色（适配深色 / 浅色主题） */
 	private final Color backgroundColor = new JBColor(Gray._240, new Color(61, 63, 65));

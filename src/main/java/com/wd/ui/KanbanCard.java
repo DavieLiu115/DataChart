@@ -73,6 +73,12 @@ public class KanbanCard {
 	private static final Color TEXT_DARK = new Color(0x333333);
 	private static final Color TEXT_LIGHT = new Color(0xDDDDDD);
 	private static final Color COMMENT_COLOR = new Color(0x888888);
+	/** 列名字体颜色（黑色，浅色主题）/ 浅白（深色主题） */
+	private static final Color COLUMN_NAME_COLOR = new Color(0x222222);
+	private static final Color COLUMN_NAME_COLOR_DARK = new Color(0xFFFFFF);
+	/** 类型字体颜色（蓝色，浅色主题）/ 浅蓝（深色主题） */
+	private static final Color TYPE_COLOR = new Color(0x2470B0);
+	private static final Color TYPE_COLOR_DARK = new Color(0x6CB0F5);
 
 	/**
 	 * 构造方法（图表模式）
@@ -319,33 +325,38 @@ public class KanbanCard {
 				(int) bounds.getHeight(),
 				8, 8);
 
-		// Header：表图标 + 表名 + 斜体注释（参考 BoardElement 风格）
-		int headerTextX = (int) bounds.getX() + padding;
-		// 表图标
+		// Header：表图标 + 表名 + 斜体注释（垂直居中）
+		int headerLeftX = (int) bounds.getX() + padding;
+		int headerCenterY = (int) (bounds.getY() + headerHeight / 2);
+
+		// 1. 表图标（垂直居中）
 		Icon tableIcon = isDark ? PluginIcons.dataSchema_dark : PluginIcons.dataSchema;
+		int headerTextX = headerLeftX;
 		if (tableIcon != null) {
-			int iconY = (int) (bounds.getY() + (headerHeight - 16) / 2);
-			tableIcon.paintIcon(null, g2d, headerTextX, iconY);
-			headerTextX += 18;
+			int iconY = headerCenterY - 8; // 图标 16px，居中
+			tableIcon.paintIcon(null, g2d, headerLeftX, iconY);
+			headerTextX = headerLeftX + 18; // 图标和文字间距
 		}
 
 		g2d.setColor(Color.WHITE);
 		g2d.setFont(headerFont);
 		FontMetrics headerFm = g2d.getFontMetrics();
 		String tableName = tableInfo.getName();
-		int headerTextY = (int) bounds.getY() + (headerHeight + headerFm.getAscent() - headerFm.getDescent()) / 2;
+		// 表名垂直居中（基于文字基线）
+		int headerTextY = headerCenterY + (headerFm.getAscent() - headerFm.getDescent()) / 2;
 		g2d.drawString(tableName, headerTextX, headerTextY);
 
-		// 表注释（斜体，灰白色）
+		// 表注释（斜体，灰白色，与表名垂直居中）
 		String tableComment = tableInfo.getComment();
 		if (tableComment != null && !tableComment.isEmpty()) {
 			int commentX = headerTextX + headerFm.stringWidth(tableName) + 6;
 			int maxCommentW = (int) (bounds.getX() + bounds.getWidth() - padding - commentX);
 			g2d.setFont(italicHeaderFont);
 			g2d.setColor(new Color(255, 255, 255, 200));
+			FontMetrics italicFm = g2d.getFontMetrics();
 			String commentText = "/* " + tableComment + " */";
-			g2d.drawString(truncateByWidth(commentText, maxCommentW, g2d.getFontMetrics()),
-					commentX, headerTextY);
+			g2d.drawString(truncateByWidth(commentText, maxCommentW, italicFm),
+					commentX, headerCenterY + (italicFm.getAscent() - italicFm.getDescent()) / 2);
 			g2d.setFont(headerFont);
 		}
 
@@ -355,59 +366,71 @@ public class KanbanCard {
 		int leftX = (int) bounds.getX() + padding;
 		double maxBodyY = bounds.getY() + bounds.getHeight() - padding;
 
-		// 计算行高（图标 14px + 留白）
-		int rowHeight = 20;
+		// 行高 18px（之前 20 太大，导致最后一行高度过大）
+		int rowHeight = 18;
 
 		g2d.setFont(columnFont);
 		FontMetrics colFm = g2d.getFontMetrics();
+		g2d.setFont(italicCommentFont);
+		FontMetrics italicFm = g2d.getFontMetrics();
+		g2d.setFont(columnFont);
 
 		int maxRows = (int) ((maxBodyY - bodyTop) / rowHeight);
 		int rowCount = Math.min(columns.size(), maxRows);
+
+		// 颜色定义
+		Color columnNameColor = isDark ? COLUMN_NAME_COLOR_DARK : COLUMN_NAME_COLOR;
+		Color typeColor = isDark ? TYPE_COLOR_DARK : TYPE_COLOR;
 
 		for (int i = 0; i < rowCount; i++) {
 			ColumnInfo col = columns.get(i);
 			double rowTop = bodyTop + i * rowHeight;
 			double rowCenterY = rowTop + rowHeight / 2;
-			int textY = (int) (rowCenterY + colFm.getAscent() / 2 - 2);
+			// 文字基线（垂直居中）
+			int textY = (int) (rowCenterY + colFm.getAscent() / 2 - 1);
 
-			// 行分隔线（参考 BoardElement：列之间画分隔线）
+			// 行分隔线
 			g2d.setColor(separatorColor);
 			g2d.drawLine((int) bounds.getX(), (int) rowTop,
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
-			// 1. 字段图标（主键金钥匙 / 索引导 / 普通点）
+			// 1. 字段图标（按 主键/可空/索引 5 种组合）
 			int iconX = leftX;
 			int iconY = (int) (rowCenterY - 7);
-			if (col.isPrimaryKey()) {
-				Icon pkIcon = isDark ? PluginIcons.colGoldKeyDotIndex_dark : PluginIcons.colGoldKeyDotIndex;
-				pkIcon.paintIcon(null, g2d, iconX, iconY);
-			} else if (col.isIndexed()) {
-				Icon idxIcon = isDark ? PluginIcons.colDotIndex_dark : PluginIcons.colDotIndex;
-				idxIcon.paintIcon(null, g2d, iconX, iconY);
-			} else {
-				Icon dotIcon = isDark ? PluginIcons.colDot_dark : PluginIcons.colDot;
-				dotIcon.paintIcon(null, g2d, iconX, iconY);
+			Icon colIcon = resolveColumnIcon(col, isDark);
+			if (colIcon != null) {
+				colIcon.paintIcon(null, g2d, iconX, iconY);
 			}
-			int colTextX = iconX + 16;
+			int colTextX = iconX + 20; // 图标和列名间距加大
 
-			// 2. 列名 : 类型（参考 BoardElement 格式）
-			g2d.setColor(textColor);
-			String columnText = col.getName() + " : " + col.getType();
-			g2d.drawString(columnText, colTextX, textY);
+			// 2. 列名（黑色）+ 冒号 + 类型（蓝色）
+			g2d.setColor(columnNameColor);
+			g2d.setFont(columnFont);
+			g2d.drawString(col.getName(), colTextX, textY);
 
-			// 3. 注释（斜体）
+			int nameW = colFm.stringWidth(col.getName());
+			int colonX = colTextX + nameW;
+			g2d.setColor(isDark ? new Color(0x888888) : new Color(0x999999));
+			g2d.drawString(" : ", colonX, textY);
+
+			int colonW = colFm.stringWidth(" : ");
+			int typeX = colonX + colonW;
+			g2d.setColor(typeColor);
+			g2d.drawString(col.getType(), typeX, textY);
+
+			int typeW = colFm.stringWidth(col.getType());
+
+			// 3. 注释（斜体灰色）
 			String comment = col.getComment();
 			if (comment != null && !comment.isEmpty()) {
-				int cmtX = colTextX + colFm.stringWidth(columnText) + 5;
+				int cmtX = typeX + typeW + 6;
 				int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
 				if (maxCmtW > 10) {
 					g2d.setFont(italicCommentFont);
 					g2d.setColor(commentColor);
 					String commentText = "/* " + comment + " */";
-					g2d.drawString(truncateByWidth(commentText, maxCmtW, g2d.getFontMetrics()),
+					g2d.drawString(truncateByWidth(commentText, maxCmtW, italicFm),
 							cmtX, textY);
-					g2d.setFont(columnFont);
-					g2d.setColor(textColor);
 				}
 			}
 		}
@@ -439,6 +462,33 @@ public class KanbanCard {
 				(int) bounds.getY() + headerHeight - 8,
 				(int) bounds.getWidth(),
 				8);
+	}
+
+	/**
+	 * 根据字段属性解析对应的图标（5 种组合）
+	 *
+	 * <ul>
+	 *   <li>主键 → colGoldKeyDotIndex（金钥匙，优先匹配）</li>
+	 *   <li>可空 + 是索引 → colIndex</li>
+	 *   <li>可空 + 不是索引 → dataColumn</li>
+	 *   <li>不可空 + 是索引 → colDotIndex</li>
+	 *   <li>不可空 + 不是索引 → colDot</li>
+	 * </ul>
+	 */
+	private static Icon resolveColumnIcon(ColumnInfo col, boolean isDark) {
+		if (col.isPrimaryKey()) {
+			return isDark ? PluginIcons.colGoldKeyDotIndex_dark : PluginIcons.colGoldKeyDotIndex;
+		}
+		if (col.isIndexed() && col.isNullable()) {
+			return PluginIcons.colIndex; // 无 _dark 版
+		}
+		if (col.isIndexed()) {
+			return isDark ? PluginIcons.colDotIndex_dark : PluginIcons.colDotIndex;
+		}
+		if (col.isNullable()) {
+			return PluginIcons.dataColumn; // 无 _dark 版
+		}
+		return isDark ? PluginIcons.colDot_dark : PluginIcons.colDot;
 	}
 
 	/**
