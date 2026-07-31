@@ -48,20 +48,17 @@ public class KanbanCard {
 	/** 选中状态 */
 	private boolean selected;
 
-	/** 选中的行（-2 表示未选中，-1 表示表卡片整体被选中；>=0 表示具体列行） */
-	private int selectedRowIndex = -2;
-
-	/** 行高亮颜色（null 表示不高亮） */
-	private java.awt.Color rowHighlightColor = null;
+	/** 用户手动选中的行集合（多个行可同时被用户选中，用橙色高亮） */
+	private final java.util.Set<Integer> highlightedRows = new java.util.HashSet<>();
 
 	/**
-	 * 用户手动选中的行（独立于连线色）
+	 * 连线占用行集合的备份（仅用于序列化/反序列化的持久化）
 	 *
-	 * <p>与 {@link #rowHighlightColor} 配合：连线和用户选中都写到 rowHighlightColor，
-	 * 但只有用户手动选中时才会记到 userSelectedRowIndex（-2=无），
-	 * 这样清除用户选中时不会误伤连线高亮。</p>
+	 * <p>实际绘制时，{@code KanbanBoard} 在每次重绘前会重新计算每张卡的
+	 * {@code linkedRows}（从 {@code connections} 推导），不依赖此字段。
+	 * 这里保留字段只是为了在加载时先恢复，绘制时立刻会被覆盖。</p>
 	 */
-	private int userSelectedRowIndex = -2;
+	private final java.util.Map<Integer, java.awt.Color> connectionHighlightRows = new java.util.HashMap<>();
 
 	// 样式
 	private int headerHeight = 28;
@@ -104,6 +101,8 @@ public class KanbanCard {
 	private static final Color TYPE_COLOR_DARK = new Color(0x6CB0F5);
 	/** 行选中高亮背景色（粉色，参考 DataHelper） */
 	private static final Color ROW_HIGHLIGHT_COLOR = new Color(0xFFB6E1);
+	/** 用户手动选中行的高亮颜色（橙色） */
+	private static final Color USER_HIGHLIGHT_COLOR = new Color(0xFE9933);
 	/** 行选中高亮背景色（橙色，参考 DataHelper） */
 	private static final Color ROW_HIGHLIGHT_COLOR_ORANGE = new Color(0xFF9F5B);
 
@@ -199,33 +198,78 @@ public class KanbanCard {
 	}
 
 	public int getSelectedRowIndex() {
-		return selectedRowIndex;
-	}
-
-	public void setSelectedRowIndex(int index) {
-		this.selectedRowIndex = index;
-	}
-
-	public int getUserSelectedRowIndex() {
-		return userSelectedRowIndex;
-	}
-
-	public void setUserSelectedRowIndex(int index) {
-		this.userSelectedRowIndex = index;
+		return highlightedRows.isEmpty() ? -2 : highlightedRows.iterator().next();
 	}
 
 	/**
-	 * 设置行高亮颜色（null = 不高亮）
+	 * 兼容旧 API：设置"用户选中"行（橙色高亮），会覆盖之前的用户选中
+	 */
+	public void setSelectedRowIndex(int index) {
+		highlightedRows.clear();
+		if (index >= 0) {
+			highlightedRows.add(index);
+		}
+	}
+
+	/**
+	 * 获取用户手动选中的行集合
+	 */
+	public java.util.Set<Integer> getHighlightedRows() {
+		return highlightedRows;
+	}
+
+	/**
+	 * 添加用户选中的行
+	 */
+	public void addHighlightedRow(int row) {
+		highlightedRows.add(row);
+	}
+
+	/**
+	 * 移除用户选中的行
+	 */
+	public void removeHighlightedRow(int row) {
+		highlightedRows.remove(row);
+	}
+
+	/**
+	 * 清除所有用户选中的行
+	 */
+	public void clearHighlightedRows() {
+		highlightedRows.clear();
+	}
+
+	/**
+	 * 兼容旧 API：设置行高亮颜色（橙色）—— 等价于添加/清除用户选中行
 	 */
 	public void setRowHighlightColor(java.awt.Color color) {
-		this.rowHighlightColor = color;
+		// 不再依赖单一颜色字段；为保持兼容，颜色变化时不清除高亮
+		// 实际高亮管理由 highlightedRows/connectionHighlightRows 各自负责
 	}
 
 	/**
-	 * 获取行高亮颜色
+	 * 兼容旧 API：获取行高亮颜色（用于 removeConnection 等）
 	 */
 	public java.awt.Color getRowHighlightColor() {
-		return rowHighlightColor;
+		return null;
+	}
+
+	/**
+	 * 设置连线占用行（持久化用，绘制时会被重写）
+	 */
+	public void setConnectionHighlightRow(int row, java.awt.Color color) {
+		if (color == null) {
+			connectionHighlightRows.remove(row);
+		} else {
+			connectionHighlightRows.put(row, color);
+		}
+	}
+
+	/**
+	 * 获取连线占用行 Map
+	 */
+	public java.util.Map<Integer, java.awt.Color> getConnectionHighlightRows() {
+		return connectionHighlightRows;
 	}
 
 	/**
@@ -312,8 +356,20 @@ public class KanbanCard {
 	 * 绘制卡片
 	 */
 	public void draw(Graphics2D g2d, boolean isDark) {
+		draw(g2d, isDark, java.util.Collections.emptyMap());
+	}
+
+	/**
+	 * 绘制卡片（表格模式支持高亮行）
+	 *
+	 * @param g2d 图形对象
+	 * @param isDark 是否深色主题
+	 * @param linkedRows 外部传入的连线占用行 Map（每次重绘前由 KanbanBoard 计算）
+	 */
+	public void draw(Graphics2D g2d, boolean isDark,
+			java.util.Map<Integer, java.awt.Color> linkedRows) {
 		if (isTableMode()) {
-			drawTableCard(g2d, isDark);
+			drawTableCard(g2d, isDark, linkedRows);
 		} else {
 			drawChartCard(g2d, isDark);
 		}
@@ -403,7 +459,8 @@ public class KanbanCard {
 	/**
 	 * 绘制表格卡片（数据库表结构）
 	 */
-	private void drawTableCard(Graphics2D g2d, boolean isDark) {
+	private void drawTableCard(Graphics2D g2d, boolean isDark,
+			java.util.Map<Integer, java.awt.Color> linkedRows) {
 		Color bg = isDark ? BG_DARK : BG_LIGHT;
 		Color border = selected ? BORDER_SELECTED : BORDER;
 		Color textColor = isDark ? TEXT_LIGHT : TEXT_DARK;
@@ -511,10 +568,17 @@ public class KanbanCard {
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
 			// 行高亮背景（在分隔线之后画，覆盖在卡片背景上）
-			// 条件：行索引匹配（连线占用 selectedRowIndex + 非橙色 / 用户选中 userSelectedRowIndex + 橙色）
-			if (rowHighlightColor != null
-					&& (i == selectedRowIndex || i == userSelectedRowIndex)) {
-				g2d.setColor(rowHighlightColor);
+			// 优先级：用户选中（橙色） > 连线占用（线色）> 普通
+			Color highlightColor = null;
+			if (highlightedRows.contains(i)) {
+				// 用户手动选中（橙色 #FE9933）
+				highlightColor = USER_HIGHLIGHT_COLOR;
+			} else if (linkedRows != null && linkedRows.get(i) != null) {
+				// 连线占用（用连线自身的颜色）
+				highlightColor = linkedRows.get(i);
+			}
+			if (highlightColor != null) {
+				g2d.setColor(highlightColor);
 				g2d.fillRect(
 						(int) bounds.getX() + 1,
 						(int) rowTop + 1,

@@ -170,5 +170,16 @@ public class ChartData {
 		public void setColumns(List<ColumnInfo> columns) {
 			this.columns = columns;
 		}
+
+		/** 用户手动选中的行索引集合（用于持久化用户橙色高亮） */
+		private List<Integer> highlightedRows = new ArrayList<>();
+
+		public List<Integer> getHighlightedRows() {
+			return highlightedRows;
+		}
+
+		public void setHighlightedRows(List<Integer> highlightedRows) {
+			this.highlightedRows = highlightedRows == null ? new ArrayList<>() : highlightedRows;
+		}
 	}
 }

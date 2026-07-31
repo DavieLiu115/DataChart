@@ -30,7 +30,9 @@ import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import javax.swing.JPanel;
 
 /**
@@ -71,6 +73,12 @@ public class KanbanBoard extends JPanel {
 
 	/** 连线列表 */
 	private final List<Connection> connections = new ArrayList<>();
+
+	/** 连线占用行缓存（每次重绘前重新计算，不依赖元素状态） */
+	private final Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = new HashMap<>();
+
+	/** 连线预览高亮（鼠标拖动时临时高亮源/目标行） */
+	private final Map<KanbanCard, Map<Integer, Color>> previewHighlightRows = new HashMap<>();
 
 	/** 当前选中的连线 */
 	private Connection selectedConnection = null;
@@ -267,13 +275,8 @@ public class KanbanBoard extends JPanel {
 									targetCard, targetRow);
 						}
 					}
-					// 退出连线模式：只清除连线预览色高亮，保留用户选中色
-					for (KanbanCard c : cards) {
-						if (CONNECTION_PREVIEW_COLOR.equals(c.getRowHighlightColor())) {
-							c.setSelectedRowIndex(-2);
-							c.setRowHighlightColor(null);
-						}
-					}
+					// 退出连线模式：清空预览高亮，保留用户选中
+					previewHighlightRows.clear();
 					connectionSource = null;
 					connectionSourceRow = -2;
 					connectionCurrentPoint = null;
@@ -290,27 +293,24 @@ public class KanbanBoard extends JPanel {
 			@Override
 			public void mouseDragged(MouseEvent e) {
 				if (isConnecting) {
-					// 连线模式：更新预览线终点，并高亮目标行
+					// 连线模式：更新预览线终点，并高亮源/目标行
 					connectionCurrentPoint = transformPoint(e.getPoint());
 					KanbanCard targetCard = findCardAt(e.getPoint());
-					// 只清除"连线预览色"高亮（保留用户选中的橙色 #FE9933）
-					for (KanbanCard c : cards) {
-						if (CONNECTION_PREVIEW_COLOR.equals(c.getRowHighlightColor())) {
-							c.setSelectedRowIndex(-2);
-							c.setRowHighlightColor(null);
-						}
-					}
-					// 高亮源行 + 目标行（用粉色预览色）
+					previewHighlightRows.clear();
+					// 高亮源行
 					if (connectionSource != null) {
-						connectionSource.setSelectedRowIndex(connectionSourceRow);
-						connectionSource.setRowHighlightColor(CONNECTION_PREVIEW_COLOR);
+						previewHighlightRows
+								.computeIfAbsent(connectionSource, k -> new HashMap<>())
+								.put(connectionSourceRow, CONNECTION_PREVIEW_COLOR);
 					}
+					// 高亮目标行
 					if (targetCard != null && targetCard != connectionSource) {
 						Point2D tp = transformPoint(e.getPoint());
 						int targetRow = targetCard.getRowIndexAt(tp.getX(), tp.getY());
 						if (targetRow >= 0) {
-							targetCard.setSelectedRowIndex(targetRow);
-							targetCard.setRowHighlightColor(CONNECTION_PREVIEW_COLOR);
+							previewHighlightRows
+									.computeIfAbsent(targetCard, k -> new HashMap<>())
+									.put(targetRow, CONNECTION_PREVIEW_COLOR);
 						}
 					}
 					repaint();
@@ -411,34 +411,23 @@ public class KanbanBoard extends JPanel {
 			 * 切换行选中状态（左键单击行时调用）
 			 *
 			 * <ul>
-			 *   <li>未选中 → 选中（橙色 #FE9933），同时清除其他表相同状态的选中</li>
+			 *   <li>未选中 → 选中（橙色 #FE9933），同时清除其他表的用户选中</li>
 			 *   <li>已选中 → 取消选中</li>
-			 *   <li>被连线占用的行（行高亮颜色不是 SELECTED_ROW_COLOR）→ 不响应切换</li>
+			 *   <li>被连线占用的行（不影响，computeLinkedRows 会自动管理）</li>
 			 * </ul>
 			 */
 			private void toggleRowSelection(KanbanCard card, int rowIndex) {
-				int userIdx = card.getUserSelectedRowIndex();
-				if (userIdx == rowIndex) {
-					// 已是"用户选中"状态 → 取消（只清 userSelectedRowIndex 和当前橙色）
-					card.setUserSelectedRowIndex(-2);
-					if (SELECTED_ROW_COLOR.equals(card.getRowHighlightColor())) {
-						card.setSelectedRowIndex(-2);
-						card.setRowHighlightColor(null);
-					}
+				java.util.Set<Integer> highlighted = card.getHighlightedRows();
+				if (highlighted.contains(rowIndex)) {
+					// 已是用户选中 → 取消
+					highlighted.remove(rowIndex);
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				} else {
-					// 切换为"用户选中"：先清除所有卡的"用户选中"状态（不碰连线色）
+					// 切换：清除所有卡的用户选中，再设当前
 					for (KanbanCard c : cards) {
-						if (c.getUserSelectedRowIndex() >= 0
-								&& SELECTED_ROW_COLOR.equals(c.getRowHighlightColor())) {
-							c.setUserSelectedRowIndex(-2);
-							c.setSelectedRowIndex(-2);
-							c.setRowHighlightColor(null);
-						}
+						c.getHighlightedRows().clear();
 					}
-					card.setUserSelectedRowIndex(rowIndex);
-					card.setSelectedRowIndex(rowIndex);
-					card.setRowHighlightColor(SELECTED_ROW_COLOR);
+					highlighted.add(rowIndex);
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				}
 				repaint();
@@ -744,10 +733,19 @@ public class KanbanBoard extends JPanel {
 
 		// 3. 绘制所有卡片
 		boolean dark = isDarkTheme();
+		// 重新计算每张卡的连线占用行（参考 DataHelper，绘制前动态计算，不依赖元素状态）
+		Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = computeLinkedRows();
 		for (KanbanCard card : cards) {
 			boolean isSelected = (card == selectedCard);
 			card.setSelected(isSelected);
-			card.draw(g2d, dark);
+			// 合并：连线占用行 + 预览高亮行（预览覆盖连线仅在预览期间）
+			Map<Integer, Color> merged = new HashMap<>(
+					linkedRowsCache.getOrDefault(card, Collections.emptyMap()));
+			Map<Integer, Color> preview = previewHighlightRows.get(card);
+			if (preview != null) {
+				merged.putAll(preview);
+			}
+			card.draw(g2d, dark, merged);
 		}
 
 		// 4. 绘制连线预览（鼠标跟随）
@@ -915,45 +913,43 @@ public class KanbanBoard extends JPanel {
 		connectionColorIndex++;
 		Connection conn = new Connection(source, sourceRow, target, targetRow, color);
 		connections.add(conn);
-		// 两端行高亮用线的颜色
-		source.setSelectedRowIndex(sourceRow);
-		source.setRowHighlightColor(color);
-		target.setSelectedRowIndex(targetRow);
-		target.setRowHighlightColor(color);
+		// 不再直接修改卡片高亮状态，绘制时由 computeLinkedRows() 动态推导
 		repaint();
 		notifyBoardChanged();
 		return conn;
 	}
 
 	/**
-	 * 删除连线（同时清除两端高亮）
+	 * 计算每张卡的连线占用行（每次重绘前调用，参考 DataHelper 设计）
+	 *
+	 * <p>遍历所有连线，把源行/目标行映射到对应卡的 Map，key=行索引，value=连线色。
+	 * {@code putIfAbsent} 保证同一行被多次连接时取第一次连线的颜色。</p>
+	 */
+	private Map<KanbanCard, Map<Integer, Color>> computeLinkedRows() {
+		Map<KanbanCard, Map<Integer, Color>> result = new HashMap<>();
+		for (Connection conn : connections) {
+			Color c = conn.getColor();
+			result.computeIfAbsent(conn.getSource(), k -> new HashMap<>())
+					.putIfAbsent(conn.getSourceRow(), c);
+			result.computeIfAbsent(conn.getTarget(), k -> new HashMap<>())
+					.putIfAbsent(conn.getTargetRow(), c);
+		}
+		return result;
+	}
+
+	/**
+	 * 删除连线（两端高亮会在下次重绘时通过 computeLinkedRows 重新计算，不需要手动清）
 	 */
 	public void removeConnection(Connection conn) {
 		if (conn == null) {
 			return;
 		}
 		connections.remove(conn);
-		// 清除两端行高亮（仅当是连线的颜色时）
-		clearRowHighlightIf(conn.getSource(), conn.getSourceRow(), conn.getColor());
-		clearRowHighlightIf(conn.getTarget(), conn.getTargetRow(), conn.getColor());
 		if (selectedConnection == conn) {
 			selectedConnection = null;
 		}
 		repaint();
 		notifyBoardChanged();
-	}
-
-	/**
-	 * 清除指定行的高亮（仅当颜色匹配时）
-	 */
-	private void clearRowHighlightIf(KanbanCard card, int rowIndex, Color color) {
-		if (card == null) {
-			return;
-		}
-		if (color != null && color.equals(card.getRowHighlightColor())) {
-			card.setRowHighlightColor(null);
-			card.setSelectedRowIndex(-2);
-		}
 	}
 
 	/**
@@ -1051,6 +1047,8 @@ public class KanbanBoard extends JPanel {
 			model.setHeight(b.getHeight());
 			// 保存列信息（避免重新打开时重新查数据库）
 			model.setColumns(new java.util.ArrayList<>(info.getColumns()));
+			// 保存用户手动选中的行（橙色高亮持久化）
+			model.setHighlightedRows(new java.util.ArrayList<>(card.getHighlightedRows()));
 			data.getTables().add(model);
 		}
 		// 保存连线
@@ -1099,6 +1097,14 @@ public class KanbanBoard extends JPanel {
 			}
 			KanbanCard card = KanbanCard.forTable(info.getId(), info,
 					model.getX(), model.getY(), model.getWidth(), model.getHeight());
+			// 恢复用户手动选中的行（橙色高亮）
+			if (model.getHighlightedRows() != null) {
+				for (Integer row : model.getHighlightedRows()) {
+					if (row != null) {
+						card.addHighlightedRow(row);
+					}
+				}
+			}
 			cards.add(card);
 		}
 
