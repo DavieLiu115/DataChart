@@ -2,10 +2,13 @@ package com.wd.ui;
 
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.wd.db.TableDropHandler;
 import com.wd.db.TableInfo;
+import com.wd.db.TableMetadataService;
+import com.wd.model.ChartData;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -23,6 +26,7 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import javax.swing.JPanel;
 
@@ -90,6 +94,12 @@ public class KanbanBoard extends JPanel {
 	/** 拖拽目标处理器（接收 Database 表拖放） */
 	private TableDropHandler dropHandler;
 
+	/** 看板内容变更监听器 */
+	private Runnable changeListener;
+
+	/** 保存动作（Command+S / Ctrl+S 触发） */
+	private Runnable saveAction;
+
 	public KanbanBoard(Project project) {
 		this.project = project;
 		setBackground(backgroundColor);
@@ -105,8 +115,27 @@ public class KanbanBoard extends JPanel {
 		dropHandler = new TableDropHandler(project, (info, dropPoint) -> {
 			// 收到表元信息后在看板绘制表卡片
 			addTableCard(info, dropPoint);
+			notifyBoardChanged();
 		});
 		dropHandler.registerTo(this);
+	}
+
+	/**
+	 * 设置看板内容变更监听器（新增/删除/移动卡片时触发，用于标记文件已修改）
+	 *
+	 * @param listener 变更回调
+	 */
+	public void setChangeListener(Runnable listener) {
+		this.changeListener = listener;
+	}
+
+	/**
+	 * 通知上层看板内容已变更
+	 */
+	private void notifyBoardChanged() {
+		if (changeListener != null) {
+			changeListener.run();
+		}
 	}
 
 	/**
@@ -152,10 +181,15 @@ public class KanbanBoard extends JPanel {
 				if (e.isPopupTrigger()) {
 					return;
 				}
+				boolean wasDraggingCard = draggedCard != null;
 				isDraggingBoard = false;
 				draggedCard = null;
 				setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				repaint();
+				// 如果拖拽过卡片，标记看板内容已变更（位置变了）
+				if (wasDraggingCard) {
+					notifyBoardChanged();
+				}
 			}
 
 			@Override
@@ -221,15 +255,84 @@ public class KanbanBoard extends JPanel {
 		addMouseMotionListener(mouseHandler);
 		addMouseWheelListener(mouseHandler);
 
-		// 键盘监听：空格键复位视图
+		// 键盘监听：空格复位视图，Command+Del(Mac)/Ctrl+Backspace(其他) 删除选中表，Command+S/Ctrl+S 保存
 		addKeyListener(new KeyAdapter() {
 			@Override
 			public void keyPressed(KeyEvent e) {
 				if (e.getKeyCode() == KeyEvent.VK_SPACE) {
 					resetView();
+					return;
+				}
+
+				int keyCode = e.getKeyCode();
+				boolean isMac = System.getProperty("os.name").toLowerCase().contains("mac");
+
+				// Command+S (Mac) / Ctrl+S (其他系统) 保存
+				if (keyCode == KeyEvent.VK_S && (e.isMetaDown() || e.isControlDown())) {
+					if (saveAction != null) {
+						saveAction.run();
+					}
+					return;
+				}
+
+				// 删除选中卡片：Command+Del (Mac) / Ctrl+Backspace (其他系统)
+				boolean isDelete = (isMac && (e.isMetaDown() || e.isControlDown())
+						&& (keyCode == KeyEvent.VK_DELETE || keyCode == KeyEvent.VK_BACK_SPACE))
+						|| (!isMac && e.isControlDown() && keyCode == KeyEvent.VK_BACK_SPACE);
+
+				if (isDelete) {
+					deleteSelectedCard();
 				}
 			}
 		});
+	}
+
+	/**
+	 * 注册保存动作（Command+S / Ctrl+S 触发）
+	 */
+	public void registerSaveAction(Runnable action) {
+		this.saveAction = action;
+	}
+
+	/**
+	 * 删除选中的卡片。
+	 *
+	 * <p>删除前检查是否有与其他表的连线，如有则弹出二次确认对话框。</p>
+	 */
+	private void deleteSelectedCard() {
+		if (selectedCard == null) {
+			return;
+		}
+		KanbanCard card = selectedCard;
+
+		// 检查是否存在涉及该表的连线
+		boolean hasRelations = hasRelationsFor(card.getId());
+		if (hasRelations) {
+			boolean confirmed = Messages.showYesNoDialog(
+					project,
+					"表 \"" + card.getName() + "\" 存在与其他表的连线，删除后连线关系将一并移除。\n\n确定要删除吗？",
+					"删除数据库表",
+					Messages.getYesButton(),
+					Messages.getNoButton(),
+					Messages.getQuestionIcon()) == Messages.YES;
+			if (!confirmed) {
+				return;
+			}
+		}
+
+		cards.remove(card);
+		if (selectedCard == card) {
+			selectedCard = null;
+		}
+		repaint();
+		notifyBoardChanged();
+	}
+
+	/**
+	 * 检查某张表是否存在连线关系
+	 */
+	private boolean hasRelationsFor(String cardId) {
+		return false; // TODO: 连线功能尚未实现，暂返回 false
 	}
 
 	/**
@@ -549,5 +652,62 @@ public class KanbanBoard extends JPanel {
 	 */
 	public Project getProject() {
 		return project;
+	}
+
+	/**
+	 * 将看板状态序列化为图数据模型（用于保存到 .datachart）
+	 *
+	 * @return ChartData，包含所有表卡片及其位置
+	 */
+	public ChartData toChartData() {
+		ChartData data = new ChartData();
+		for (KanbanCard card : cards) {
+			TableInfo info = card.getTableInfo();
+			if (info == null) {
+				continue;
+			}
+			ChartData.TableCardModel model = new ChartData.TableCardModel();
+			model.setId(card.getId());
+			model.setDatasource(info.getDatasourceName());
+			model.setSchema(info.getSchema());
+			model.setTableName(info.getName());
+			model.setComment(info.getComment());
+			Rectangle2D b = card.getBounds();
+			model.setX(b.getX());
+			model.setY(b.getY());
+			model.setWidth(b.getWidth());
+			model.setHeight(b.getHeight());
+			data.getTables().add(model);
+		}
+		return data;
+	}
+
+	/**
+	 * 从图数据模型恢复看板状态（打开 .datachart 文件时调用）
+	 *
+	 * @param data 图数据模型
+	 */
+	public void loadFromChartData(ChartData data) {
+		if (data == null) {
+			return;
+		}
+		cards.clear();
+		for (ChartData.TableCardModel model : data.getTables()) {
+			// 需要重新查询元信息以重建卡片
+			TableMetadataService svc = TableMetadataService.getInstance(project);
+			TableInfo info = svc.getFetcher().fetchTableInfo(
+					project, model.getDatasource(), model.getTableName());
+			if (info == null) {
+				// 元信息查询失败，用模型里的基本信息构造一个空的 TableInfo
+				info = new TableInfo(model.getId(), model.getTableName(),
+						model.getSchema(), model.getDatasource(),
+						model.getComment(), Collections.emptyList());
+			}
+			KanbanCard card = KanbanCard.forTable(info.getId(), info,
+					model.getX(), model.getY(), model.getWidth(), model.getHeight());
+			cards.add(card);
+		}
+		selectedCard = null;
+		repaint();
 	}
 }

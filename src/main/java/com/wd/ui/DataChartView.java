@@ -5,6 +5,8 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SearchTextField;
 import com.wd.icon.PluginIcons;
+import com.wd.model.ChartData;
+import com.alibaba.fastjson.JSON;
 import java.awt.BorderLayout;
 import javax.swing.Action;
 import javax.swing.JButton;
@@ -31,6 +33,12 @@ public class DataChartView extends DialogWrapper {
 	private KanbanBoard kanbanBoard;
 	private Project project;
 
+	/** 看板内容变更回调（转发给 DataChartEditor 标记修改状态） */
+	private Runnable boardChangeListener;
+
+	/** 保存回调（Command+S 时触发，由 DataChartEditor 注册） */
+	private Runnable saveListener;
+
 	public DataChartView(@Nullable Project project) {
 		super(project);
 		this.project = project;
@@ -54,7 +62,63 @@ public class DataChartView extends DialogWrapper {
 		dataView.setLayout(new BorderLayout());
 		kanbanBoard = new KanbanBoard(project);
 		dataView.add(kanbanBoard, BorderLayout.CENTER);
+		// 看板内容变更时通知上层（DataChartEditor 标记文件已修改）
+		kanbanBoard.setChangeListener(() -> {
+			if (boardChangeListener != null) {
+				boardChangeListener.run();
+			}
+		});
+		// Command+S / Ctrl+S 保存
+		kanbanBoard.registerSaveAction(() -> {
+			if (saveListener != null) {
+				saveListener.run();
+			}
+		});
 		// 看板初始为空，等待用户从 Database 工具窗口拖入表
+	}
+
+	/**
+	 * 设置看板内容变更回调（由 DataChartEditor 注册，用于标记文件修改状态）
+	 */
+	public void setBoardChangeListener(Runnable listener) {
+		this.boardChangeListener = listener;
+	}
+
+	/**
+	 * 设置保存回调（由 DataChartEditor 注册，Command+S 时调用 saveDocument）
+	 */
+	public void setSaveListener(Runnable listener) {
+		this.saveListener = listener;
+	}
+
+	/**
+	 * 将当前看板状态序列化为 JSON 字符串（保存 .datachart 时使用）
+	 */
+	public String serializeToJson() {
+		ChartData data = kanbanBoard.toChartData();
+		return JSON.toJSONString(data);
+	}
+
+	/**
+	 * 从 JSON 字符串加载看板状态（打开 .datachart 时使用）
+	 */
+	public void loadFromJson(String json) {
+		if (json == null || json.isEmpty()) {
+			return;
+		}
+		try {
+			ChartData data = JSON.parseObject(json, ChartData.class);
+			kanbanBoard.loadFromChartData(data);
+		} catch (Exception e) {
+			// 解析失败时忽略，保持空看板
+		}
+	}
+
+	/**
+	 * 获取看板组件
+	 */
+	public KanbanBoard getKanbanBoard() {
+		return kanbanBoard;
 	}
 
 	/**
