@@ -89,15 +89,16 @@ public class KanbanBoard extends JPanel {
 	/** 卡片默认尺寸 */
 	private static final double DEFAULT_CARD_WIDTH = 200;
 
-	/** 连线颜色集合（每次连线从色板循环取一个） */
+	/** 连线颜色集合（浅色不饱和，每条连线用一种） */
 	private static final java.awt.Color[] CONNECTION_COLOR_PALETTE = {
-			new Color(0xFF69B4), // 粉色
-			new Color(0xFF9F5B), // 橙色
-			new Color(0x9013FE), // 紫色
-			new Color(0x2470B0), // 蓝色
-			new Color(0x7ED321), // 绿色
-			new Color(0xF5A623), // 黄色
-			new Color(0xE74C3C)  // 红色
+			new Color(0xB0C4DE), // 浅钢蓝
+			new Color(0xC8A2C8), // 淡紫
+			new Color(0xFFD1A4), // 浅橙
+			new Color(0xC1E1C5), // 浅绿
+			new Color(0xFFB7B2), // 浅粉红
+			new Color(0xFFE9A8), // 浅黄
+			new Color(0xAEC6CF), // 浅蓝灰
+			new Color(0xD7BDE2)  // 淡紫罗兰
 	};
 
 	/** 当前连线颜色索引（循环分配） */
