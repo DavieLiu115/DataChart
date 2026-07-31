@@ -46,3 +46,16 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 `sinceBuild`/`untilBuild` 需与本地 IDE 版本匹配：
 - `ideaIC-2022.3` → `sinceBuild=223`
 - `ideaIC-2023.2` → `sinceBuild=232`
+
+### 7. Java 源码必须放在 src/main/java
+`.java` 文件必须放在 `src/main/java/`，不能放在 `src/main/kotlin/`。Kotlin Gradle 插件只编译 `.kt` 文件，Java 插件只编译 `src/main/java` 下的 `.java` 文件。放错目录会导致 `ClassNotFoundException`（`build/classes` 为空）。
+
+### 8. .form 文件支持的 border 类型有限
+`.form` 文件（GUI Designer）不支持 `matte` border 类型，会报 `UnexpectedFormElementException: unknown type: matte`。支持的类型只有：`none` / `etched` / `bevel` / `line` / `titled` / `empty` / `compound`。
+- **间距**：用 `.form` 的 `<margin>` 控制
+- **分隔线**：在 Java 代码中 `setBorder(new MatteBorder(0,0,1,0, JBColor.border()))`
+- **注意**：`.form` 的 margin 与 Java 的 `EmptyBorder` 会叠加成双重内边距，二者只能选其一
+- **主题适配**：分隔线颜色用 `JBColor.border()`，自动适配深色/浅色主题
+
+### 9. 扩展名统一管理
+所有文件扩展名统一用 `DataToolsFileType.EXTENSION = "datachart"` 常量，避免硬编码导致大小写不一致（曾导致 `getDefaultExtension()` 返回 `"dataChart"` 与注册的 `"datachart"` 不一致，使右键 New 菜单不显示文件类型）。

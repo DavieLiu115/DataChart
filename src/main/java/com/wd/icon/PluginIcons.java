@@ -17,8 +17,6 @@ public class PluginIcons {
     public static final Icon testCustom_dark = load("/icons/testCustom_dark.svg");
     public static final Icon warningDialog = load("/icons/warningDialog.svg");
     public static final Icon warningDialog_dark = load("/icons/warningDialog_dark.svg");
-    public static final Icon excel = load("/icons/excel.svg");
-    public static final Icon excel_dark = load("/icons/excel_dark.svg");
     public static final Icon diagram = load("/icons/diagram.svg");
     public static final Icon diagram_dark = load("/icons/diagram_dark.svg");
     public static final Icon download = load("/icons/download.svg");
@@ -63,6 +61,10 @@ public class PluginIcons {
     public static final Icon success_dark = load("/icons/success_dark.svg");
     public static final Icon testFailed = load("/icons/testFailed.svg");
     public static final Icon testFailed_dark = load("/icons/testFailed_dark.svg");
+    public static final Icon search = load("/icons/search.svg");
+    public static final Icon search_dark = load("/icons/search_dark.svg");
+    public static final Icon fullScream = load("/icons/fullScream.svg");
+    public static final Icon exit_fullScream = load("/icons/exit_fullScream.svg");
     public static final Icon columnFilter = load("/icons/columnFilter.svg");
 
     public static final Icon extension = load("/icons/extension.svg");
