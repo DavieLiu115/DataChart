@@ -1,5 +1,6 @@
 package com.wd.ui;
 
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
@@ -34,6 +35,8 @@ import javax.swing.JPanel;
  * @author lww
  */
 public class KanbanBoard extends JPanel {
+
+	private static final Logger LOG = Logger.getInstance(KanbanBoard.class);
 
 	/** 变换矩阵（用于平移和缩放） */
 	private AffineTransform transform = new AffineTransform();
@@ -499,6 +502,7 @@ public class KanbanBoard extends JPanel {
 	 */
 	public void addTableCard(TableInfo info, Point dropPoint) {
 		if (info == null) {
+			LOG.warn("[看板] addTableCard 收到 null TableInfo，忽略");
 			return;
 		}
 		// 高度 = 顶部 header + 列数行 + 底部 padding
@@ -520,10 +524,20 @@ public class KanbanBoard extends JPanel {
 			y = 0;
 		}
 
+		LOG.info("[看板] 开始绘制表卡片: 表=" + info.getName()
+				+ ", 数据源=" + info.getDatasourceName()
+				+ ", schema=" + info.getSchema()
+				+ ", 字段数=" + info.getColumns().size()
+				+ ", 拖放屏幕点=" + (dropPoint == null ? "null" : dropPoint.x + "," + dropPoint.y)
+				+ ", 卡片画板坐标=(" + (int) x + "," + (int) y + ")"
+				+ ", 卡片尺寸=" + (int) TABLE_CARD_WIDTH + "x" + (int) height
+				+ ", 缩放=" + zoomFactor);
+
 		KanbanCard card = KanbanCard.forTable(info.getId(), info,
 				x, y, TABLE_CARD_WIDTH, height);
 		if (dropPoint != null) {
 			cards.add(card); // 直接添加到指定位置，不自动平铺
+			LOG.info("[看板] 卡片已添加，当前卡片总数=" + cards.size() + "，请求重绘");
 			repaint();
 		} else {
 			addCard(card);

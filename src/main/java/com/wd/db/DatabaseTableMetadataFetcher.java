@@ -37,7 +37,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static Class<?> dbPsiFacadeClass;
 	private static Class<?> dasUtilClass;
 	private static Class<?> dbDataSourceClass;
-	private static Class<?> dasTableClass;
+	private static Class<?> dasObjectClass;
 	private static boolean classesInitialized = false;
 	private static boolean classesAvailable = false;
 
@@ -89,7 +89,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 				return result;
 			}
 			// 通过 DasUtil.getTables(dataSource) 获取表列表
-			Collection<?> tables = invokeStaticWithArg(dasUtilClass, "getTables", dbDataSourceClass, dataSource);
+			Iterable<?> tables = invokeStaticAsIterable(dasUtilClass, "getTables", dbDataSourceClass, dataSource);
 			if (tables == null) {
 				return result;
 			}
@@ -130,7 +130,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			String id = schema + "." + tableName;
 
 			List<ColumnInfo> columns = new ArrayList<>();
-			Collection<?> dasColumns = invokeStaticWithArg(dasUtilClass, "getColumns", dasTableClass, table);
+			Iterable<?> dasColumns = invokeStaticAsIterable(dasUtilClass, "getColumns", dasObjectClass, table);
 			if (dasColumns != null) {
 				for (Object col : dasColumns) {
 					String colName = invokeStringNoArgs(col, "getName");
@@ -152,9 +152,66 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 							isPrimary, isNullable, isIndexed));
 				}
 			}
+		return new TableInfo(id, tableName, schema, datasourceName, comment, columns);
+	} catch (Exception e) {
+			LOG.warn("fetchTableInfo failed for table: " + tableName, e);
+			return null;
+		}
+	}
+
+	/**
+	 * 直接基于拖拽来的 DbTable 对象提取元信息（推荐用于拖拽场景）
+	 *
+	 * <p>比 {@link #fetchTableInfo} 更可靠：无需通过数据源名称重新匹配查找表，
+	 * 直接用拖拽得到的对象，避免数据源显示名与唯一标识不一致的问题。</p>
+	 *
+	 * @param project 当前工程
+	 * @param dbTable 拖拽来的 DbTable 对象（实现 DbElement）
+	 * @return 表元信息
+	 */
+	public TableInfo fetchTableInfoByElement(Project project, Object dbTable) {
+		if (!isAvailable() || project == null || dbTable == null) {
+			return null;
+		}
+		try {
+			String tableName = invokeStringNoArgs(dbTable, "getName");
+			String schema = invokeStringNoArgs(dbTable, "getSchema");
+			String comment = invokeStringNoArgs(dbTable, "getComment");
+
+			// 数据源名
+			Object dataSource = invokeNoArgs(dbTable, "getDataSource");
+			String datasourceName = "";
+			if (dataSource != null) {
+				Object dsName = invokeNoArgs(dataSource, "getName");
+				if (dsName != null) {
+					datasourceName = dsName.toString();
+				}
+			}
+			String id = (schema == null ? "" : schema) + "." + tableName;
+
+			List<ColumnInfo> columns = new ArrayList<>();
+			Iterable<?> dasColumns = invokeStaticAsIterable(dasUtilClass, "getColumns", dasObjectClass, dbTable);
+			if (dasColumns != null) {
+				for (Object col : dasColumns) {
+					String colName = invokeStringNoArgs(col, "getName");
+					String colType = resolveColumnType(col);
+					String colComment = invokeStringNoArgs(col, "getComment");
+
+					boolean isPrimary = hasColumnAttribute(dbTable, col, "PRIMARY_KEY");
+					boolean isIndexed = hasColumnAttribute(dbTable, col, "INDEX");
+
+					Boolean isNotNull = invokeBooleanNoArgs(col, "isNotNull");
+					boolean isNullable = isNotNull == null || !isNotNull;
+
+					columns.add(new ColumnInfo(colName, colType, colComment,
+							isPrimary, isNullable, isIndexed));
+				}
+			}
+			LOG.info("fetchTableInfoByElement success: table=" + tableName
+					+ ", datasource=" + datasourceName + ", columns=" + columns.size());
 			return new TableInfo(id, tableName, schema, datasourceName, comment, columns);
 		} catch (Exception e) {
-			LOG.warn("fetchTableInfo failed for table: " + tableName, e);
+			LOG.warn("fetchTableInfoByElement failed for table: " + (dbTable == null ? "null" : dbTable), e);
 			return null;
 		}
 	}
@@ -277,7 +334,8 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			dbPsiFacadeClass = Class.forName("com.intellij.database.psi.DbPsiFacade");
 			dasUtilClass = Class.forName("com.intellij.database.util.DasUtil");
 			dbDataSourceClass = Class.forName("com.intellij.database.psi.DbDataSource");
-			dasTableClass = Class.forName("com.intellij.database.model.DasTable");
+			// DasUtil.getColumns(DasObject) / getTables(DasDataSource) - 用父类型
+			dasObjectClass = Class.forName("com.intellij.database.model.DasObject");
 			// 验证 DasColumn 类可加载（仅做存在性校验）
 			Class.forName("com.intellij.database.model.DasColumn");
 			classesAvailable = true;
@@ -301,6 +359,20 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static Collection<?> invokeStaticWithArg(Class<?> clazz, String method, Class<?> argType, Object arg) {
 		Object result = invokeStatic(clazz, method, argType, arg);
 		return result instanceof Collection ? (Collection<?>) result : null;
+	}
+
+	/**
+	 * 调用静态方法并返回 Iterable，兼容 Collection 和 JBIterable
+	 *
+	 * <p>DasUtil 在 2023.2/2025.3 中返回 {@code JBIterable}（实现 {@code Iterable}），
+	 * 不是 {@code Collection}，需要特殊处理。</p>
+	 */
+	private static Iterable<?> invokeStaticAsIterable(Class<?> clazz, String method, Class<?> argType, Object arg) {
+		Object result = invokeStatic(clazz, method, argType, arg);
+		if (result instanceof Iterable) {
+			return (Iterable<?>) result;
+		}
+		return null;
 	}
 
 	private static Object invokeNoArgs(Object target, String method) {
@@ -364,7 +436,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	}
 
 	private static Object findTable(Object dataSource, String tableName) {
-		Collection<?> tables = invokeStaticWithArg(dasUtilClass, "getTables", dbDataSourceClass, dataSource);
+		Iterable<?> tables = invokeStaticAsIterable(dasUtilClass, "getTables", dbDataSourceClass, dataSource);
 		if (tables == null) {
 			return null;
 		}

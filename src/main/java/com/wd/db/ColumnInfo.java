@@ -50,11 +50,16 @@ public class ColumnInfo {
 
 	@Override
 	public String toString() {
-		return "ColumnInfo{" +
-				"name='" + name + '\'' +
-				", type='" + type + '\'' +
-				(isPrimaryKey ? ", PK" : "") +
-				(isIndexed ? ", IDX" : "") +
-				'}';
+		StringBuilder sb = new StringBuilder();
+		sb.append("ColumnInfo{name='").append(name)
+				.append("', type='").append(type).append('\'')
+				.append(", nullable=").append(isNullable)
+				.append(", pk=").append(isPrimaryKey)
+				.append(", idx=").append(isIndexed);
+		if (comment != null && !comment.isEmpty()) {
+			sb.append(", comment='").append(comment).append('\'');
+		}
+		sb.append('}');
+		return sb.toString();
 	}
 }

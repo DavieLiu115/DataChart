@@ -63,11 +63,20 @@ public class TableInfo {
 
 	@Override
 	public String toString() {
-		return "TableInfo{" +
-				"id='" + id + '\'' +
-				", name='" + name + '\'' +
-				", schema='" + schema + '\'' +
-				", columns=" + columns.size() +
-				'}';
+		StringBuilder sb = new StringBuilder();
+		sb.append("TableInfo{id='").append(id)
+				.append("', name='").append(name)
+				.append("', schema='").append(schema)
+				.append("', datasource='").append(datasourceName)
+				.append("', comment='").append(comment)
+				.append("', columns=[");
+		for (int i = 0; i < columns.size(); i++) {
+			if (i > 0) {
+				sb.append(", ");
+			}
+			sb.append(columns.get(i).toString());
+		}
+		sb.append("]}");
+		return sb.toString();
 	}
 }
