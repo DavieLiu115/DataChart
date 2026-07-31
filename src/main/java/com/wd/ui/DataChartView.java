@@ -30,6 +30,7 @@ public class DataChartView extends DialogWrapper {
 	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
 	private JPanel dataView;
+	private JButton autoLayoutButton;
 	private KanbanBoard kanbanBoard;
 	private Project project;
 
@@ -50,6 +51,7 @@ public class DataChartView extends DialogWrapper {
 		fullScreamButton.setIcon(PluginIcons.fullScream);
 		exportPDFButton.setIcon(PluginIcons.export);
 		exportPictureButton.setIcon(PluginIcons.image);
+		autoLayoutButton.setIcon(PluginIcons.autoLayout);
 	}
 
 	/**

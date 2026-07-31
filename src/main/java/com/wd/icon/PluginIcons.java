@@ -67,6 +67,9 @@ public class PluginIcons {
     public static final Icon exit_fullScream = load("/icons/exit_fullScream.svg");
     public static final Icon columnFilter = load("/icons/columnFilter.svg");
 
+    public static final Icon autoLayout = load("/icons/autoLayout.svg");
+    public static final Icon autoLayout_dark = load("/icons/autoLayout_dark.svg");
+
     public static final Icon extension = load("/icons/extension.svg");
     public static final Icon extension_dark = load("/icons/extension_dark.svg");
     public static final Icon preview = load("/icons/preview.svg");
