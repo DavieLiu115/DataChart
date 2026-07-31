@@ -1,5 +1,6 @@
 package com.wd.model;
 
+import com.wd.db.ColumnInfo;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -157,6 +158,17 @@ public class ChartData {
 
 		public void setHeight(double height) {
 			this.height = height;
+		}
+
+		/** 字段列表（用于持久化，避免重新查询数据库） */
+		private List<ColumnInfo> columns = new ArrayList<>();
+
+		public List<ColumnInfo> getColumns() {
+			return columns;
+		}
+
+		public void setColumns(List<ColumnInfo> columns) {
+			this.columns = columns;
 		}
 	}
 }

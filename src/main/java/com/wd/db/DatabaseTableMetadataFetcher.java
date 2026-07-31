@@ -36,7 +36,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	/** 反射缓存：避免重复查找 Class/Method */
 	private static Class<?> dbPsiFacadeClass;
 	private static Class<?> dasUtilClass;
-	private static Class<?> dbDataSourceClass;
+	private static Class<?> dasDataSourceClass;
 	private static Class<?> dasObjectClass;
 	private static boolean classesInitialized = false;
 	private static boolean classesAvailable = false;
@@ -89,7 +89,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 				return result;
 			}
 			// 通过 DasUtil.getTables(dataSource) 获取表列表
-			Iterable<?> tables = invokeStaticAsIterable(dasUtilClass, "getTables", dbDataSourceClass, dataSource);
+			Iterable<?> tables = invokeStaticAsIterable(dasUtilClass, "getTables", dasDataSourceClass, dataSource);
 			if (tables == null) {
 				return result;
 			}
@@ -333,8 +333,9 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 		try {
 			dbPsiFacadeClass = Class.forName("com.intellij.database.psi.DbPsiFacade");
 			dasUtilClass = Class.forName("com.intellij.database.util.DasUtil");
-			dbDataSourceClass = Class.forName("com.intellij.database.psi.DbDataSource");
-			// DasUtil.getColumns(DasObject) / getTables(DasDataSource) - 用父类型
+			// DasUtil.getTables 参数类型是 com.intellij.database.model.DasDataSource
+			dasDataSourceClass = Class.forName("com.intellij.database.model.DasDataSource");
+			// DasUtil.getColumns 参数类型是 com.intellij.database.model.DasObject
 			dasObjectClass = Class.forName("com.intellij.database.model.DasObject");
 			// 验证 DasColumn 类可加载（仅做存在性校验）
 			Class.forName("com.intellij.database.model.DasColumn");
@@ -381,9 +382,22 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			if (m == null) {
 				return null;
 			}
-			return m.invoke(target);
+			return invokeMethod(m, target);
 		} catch (Exception e) {
 			LOG.warn("invokeNoArgs failed: " + target.getClass().getSimpleName() + "." + method, e);
+			return null;
+		}
+	}
+
+	/**
+	 * 反射调用方法（跨模块需要 setAccessible，否则模块系统会抛 IllegalAccessException）
+	 */
+	private static Object invokeMethod(Method m, Object target, Object... args) {
+		try {
+			m.setAccessible(true);
+			return m.invoke(target, args);
+		} catch (Exception e) {
+			LOG.warn("invokeMethod failed: " + m.getName(), e);
 			return null;
 		}
 	}
@@ -436,7 +450,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	}
 
 	private static Object findTable(Object dataSource, String tableName) {
-		Iterable<?> tables = invokeStaticAsIterable(dasUtilClass, "getTables", dbDataSourceClass, dataSource);
+		Iterable<?> tables = invokeStaticAsIterable(dasUtilClass, "getTables", dasDataSourceClass, dataSource);
 		if (tables == null) {
 			return null;
 		}

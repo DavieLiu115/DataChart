@@ -5,6 +5,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
+import com.wd.db.ColumnInfo;
 import com.wd.db.TableDropHandler;
 import com.wd.db.TableInfo;
 import com.wd.db.TableMetadataService;
@@ -657,7 +658,7 @@ public class KanbanBoard extends JPanel {
 	/**
 	 * 将看板状态序列化为图数据模型（用于保存到 .datachart）
 	 *
-	 * @return ChartData，包含所有表卡片及其位置
+	 * @return ChartData，包含所有表卡片及其位置、列信息
 	 */
 	public ChartData toChartData() {
 		ChartData data = new ChartData();
@@ -677,6 +678,8 @@ public class KanbanBoard extends JPanel {
 			model.setY(b.getY());
 			model.setWidth(b.getWidth());
 			model.setHeight(b.getHeight());
+			// 保存列信息（避免重新打开时重新查数据库）
+			model.setColumns(new java.util.ArrayList<>(info.getColumns()));
 			data.getTables().add(model);
 		}
 		return data;
@@ -684,6 +687,9 @@ public class KanbanBoard extends JPanel {
 
 	/**
 	 * 从图数据模型恢复看板状态（打开 .datachart 文件时调用）
+	 *
+	 * <p>优先使用 JSON 中保存的列信息（快速、离线可用），
+	 * 如未保存列信息则尝试重新查询元信息（失败时用空 TableInfo）。</p>
 	 *
 	 * @param data 图数据模型
 	 */
@@ -693,15 +699,24 @@ public class KanbanBoard extends JPanel {
 		}
 		cards.clear();
 		for (ChartData.TableCardModel model : data.getTables()) {
-			// 需要重新查询元信息以重建卡片
-			TableMetadataService svc = TableMetadataService.getInstance(project);
-			TableInfo info = svc.getFetcher().fetchTableInfo(
-					project, model.getDatasource(), model.getTableName());
-			if (info == null) {
-				// 元信息查询失败，用模型里的基本信息构造一个空的 TableInfo
+			TableInfo info;
+			List<ColumnInfo> savedColumns = model.getColumns();
+			if (savedColumns != null && !savedColumns.isEmpty()) {
+				// 优先用 JSON 里保存的列（快速、离线可用）
 				info = new TableInfo(model.getId(), model.getTableName(),
 						model.getSchema(), model.getDatasource(),
-						model.getComment(), Collections.emptyList());
+						model.getComment(), savedColumns);
+			} else {
+				// 没有保存列信息，尝试重新查询元信息
+				TableMetadataService svc = TableMetadataService.getInstance(project);
+				info = svc.getFetcher().fetchTableInfo(
+						project, model.getDatasource(), model.getTableName());
+				if (info == null) {
+					// 查询失败，构造空 TableInfo
+					info = new TableInfo(model.getId(), model.getTableName(),
+							model.getSchema(), model.getDatasource(),
+							model.getComment(), Collections.emptyList());
+				}
 			}
 			KanbanCard card = KanbanCard.forTable(info.getId(), info,
 					model.getX(), model.getY(), model.getWidth(), model.getHeight());
