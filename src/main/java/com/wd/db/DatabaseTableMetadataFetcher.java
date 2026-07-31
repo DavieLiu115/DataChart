@@ -38,6 +38,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static Class<?> dasUtilClass;
 	private static Class<?> dbDataSourceClass;
 	private static Class<?> dasTableClass;
+	private static Class<?> dasColumnClass;
 	private static boolean classesInitialized = false;
 	private static boolean classesAvailable = false;
 
@@ -57,7 +58,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			if (facade == null) {
 				return Collections.emptyList();
 			}
-			Collection<?> dataSources = invokeDataSources(facade);
+			Collection<?> dataSources = invokeNoArgs(facade, "getDataSources");
 			if (dataSources == null) {
 				return Collections.emptyList();
 			}
@@ -142,11 +143,11 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 						colType = colType.replace("`", "").replace("\"", "");
 					}
 					String colComment = invokeStringNoArgs(col, "getComment");
-					Boolean isPrimary = invokeBooleanNoArgs(col, "isPrimary");
+					boolean isPrimary = invokeBooleanNoArgs(col, "isPrimary");
 					if (isPrimary == null) {
 						isPrimary = invokeBooleanNoArgs(col, "isPrimaryKey");
 					}
-					Boolean isNullable = invokeBooleanNoArgs(col, "isNotNull");
+					boolean isNullable = invokeBooleanNoArgs(col, "isNotNull");
 					// DasColumn.isNotNull 表示"非空"，需取反
 					if (isNullable != null) {
 						isNullable = !isNullable;
@@ -171,8 +172,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static boolean isDatabasePluginEnabled() {
 		try {
 			PluginId id = PluginId.getId(DATABASE_PLUGIN_ID);
-			// isPluginInstalled 兼容旧版 SDK（isPluginEnabled 是较新版本才有的 API）
-			return PluginManagerCore.isPluginInstalled(id);
+			return PluginManagerCore.isPluginInstalled(id) && PluginManagerCore.isPluginEnabled(id);
 		} catch (Exception e) {
 			return false;
 		}
@@ -189,8 +189,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			dasUtilClass = Class.forName("com.intellij.database.util.DasUtil");
 			dbDataSourceClass = Class.forName("com.intellij.database.psi.DbDataSource");
 			dasTableClass = Class.forName("com.intellij.database.model.DasTable");
-			// 验证 DasColumn 类可加载（仅做存在性校验）
-			Class.forName("com.intellij.database.model.DasColumn");
+			dasColumnClass = Class.forName("com.intellij.database.model.DasColumn");
 			classesAvailable = true;
 		} catch (ClassNotFoundException e) {
 			LOG.warn("Database plugin classes not available. Please install/enable the Database plugin.", e);
@@ -227,12 +226,6 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 		}
 	}
 
-	/** 获取 DbPsiFacade.getDataSources() 的结果集合 */
-	private static Collection<?> invokeDataSources(Object facade) {
-		Object result = invokeNoArgs(facade, "getDataSources");
-		return result instanceof Collection ? (Collection<?>) result : null;
-	}
-
 	private static String invokeStringNoArgs(Object target, String method) {
 		Object result = invokeNoArgs(target, method);
 		return result == null ? null : result.toString();
@@ -261,7 +254,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	}
 
 	private static Object findDataSource(Object facade, String name) {
-		Collection<?> sources = invokeDataSources(facade);
+		Collection<?> sources = invokeNoArgs(facade, "getDataSources");
 		if (sources == null) {
 			return null;
 		}
