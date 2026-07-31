@@ -494,8 +494,8 @@ public class KanbanCard {
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
 			// 选中行高亮背景（在分隔线之后画，覆盖在卡片背景上）
-			// 只检查 rowHighlightColor，不再依赖 selectedRowIndex，保证连线端高亮不会因 selectedRowIndex 被重置而丢失
-			if (rowHighlightColor != null) {
+			// 必须同时匹配行索引，否则 rowHighlightColor 会应用到所有行导致整卡变色
+			if (i == selectedRowIndex && rowHighlightColor != null) {
 				g2d.setColor(rowHighlightColor);
 				g2d.fillRect(
 						(int) bounds.getX() + 1,
