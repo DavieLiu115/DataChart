@@ -40,7 +40,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 			synchronized (this) {
 				if (!initialized) {
 					dataView = new DataChartView(project);
-					editorPanel.add(dataView.getRootComponent(), BorderLayout.CENTER);
+					editorPanel.add(dataView.getRootComponent());
 					initialized = true;
 				}
 			}
