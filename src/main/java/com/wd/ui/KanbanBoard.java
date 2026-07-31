@@ -1535,7 +1535,11 @@ public class KanbanBoard extends JPanel {
 	 * <p>水平方向：把当前卡片的 左/中/右 与其它卡片的 左/中/右 对齐；</p>
 	 * <p>垂直方向：把当前卡片的 上/中/下 与其它卡片的 上/中/下 对齐。</p>
 	 *
-	 * <p>距离小于 SNAP_THRESHOLD 时直接吸附，否则只在 ALIGN_THRESHOLD 内显示辅助线。</p>
+	 * <p>关键：吸附时必须用"匹配的那条边"（如 sys_job 底部对齐 gen 顶部，就把 sys_job 的
+	 * 底部写到 gen 顶部位置，而不是把 sys_job 的左上角写到那里）。</p>
+	 *
+	 * <p>距离小于 SNAP_THRESHOLD 时直接吸附；距离在 SNAP 与 ALIGN 之间时只显示辅助线，
+	 * 不吸附（让用户看到对齐关系但不被强制锁定）。</p>
 	 *
 	 * @param moving 当前正在拖动的卡片
 	 */
@@ -1546,18 +1550,17 @@ public class KanbanBoard extends JPanel {
 			return;
 		}
 		Rectangle2D mb = moving.getBounds();
-		double[] myXs = {mb.getX(), mb.getX() + mb.getWidth() / 2.0, mb.getX() + mb.getWidth()};
-		double[] myYs = {mb.getY(), mb.getY() + mb.getHeight() / 2.0, mb.getY() + mb.getHeight()};
+		double cardW = mb.getWidth();
+		double cardH = mb.getHeight();
+		// 自己的 3 条候选边：左、中、右（X 方向）；上、中、下（Y 方向）
+		double myLeft = mb.getX();
+		double myCenterX = mb.getX() + cardW / 2.0;
+		double myRight = mb.getX() + cardW;
+		double myTop = mb.getY();
+		double myCenterY = mb.getY() + cardH / 2.0;
+		double myBottom = mb.getY() + cardH;
 
-		double bestDx = Double.POSITIVE_INFINITY;
-		double bestSnapX = 0;
-		boolean hasSnapX = false;
-
-		double bestDy = Double.POSITIVE_INFINITY;
-		double bestSnapY = 0;
-		boolean hasSnapY = false;
-
-		// 找到所有候选对齐点（画板坐标）
+		// 收集其它卡片的 3 条候选边
 		List<Double> xCandidates = new ArrayList<>();
 		List<Double> yCandidates = new ArrayList<>();
 		for (KanbanCard other : cards) {
@@ -1573,52 +1576,86 @@ public class KanbanBoard extends JPanel {
 			yCandidates.add(ob.getY() + ob.getHeight());
 		}
 
-		// 水平：x 对齐
-		for (double mx : myXs) {
-			for (double ox : xCandidates) {
-				double dx = ox - mx;
-				double abs = Math.abs(dx);
-				if (abs < bestDx) {
-					bestDx = abs;
-					bestSnapX = ox;
-					hasSnapX = true;
-				}
-			}
+		// 没有候选 → 清掉辅助线
+		if (xCandidates.isEmpty() && yCandidates.isEmpty()) {
+			activeSnapGuideV = null;
+			activeSnapGuideH = null;
+			return;
 		}
-		// 垂直：y 对齐
-		for (double my : myYs) {
-			for (double oy : yCandidates) {
-				double dy = oy - my;
-				double abs = Math.abs(dy);
-				if (abs < bestDy) {
-					bestDy = abs;
-					bestSnapY = oy;
-					hasSnapY = true;
+
+		// X 方向：找最近的 (mySide, otherSide) 对，记录 mySide 是 0=左/1=中/2=右
+		double bestDx = Double.POSITIVE_INFINITY;
+		double bestSnapX = 0;
+		int bestMyXSide = 0;
+		boolean hasSnapX = false;
+		if (!xCandidates.isEmpty()) {
+			double[][] myXArr = {
+					{myLeft, 0}, {myCenterX, 1}, {myRight, 2}
+			};
+			for (double[] mine : myXArr) {
+				double mx = mine[0];
+				int side = (int) mine[1];
+				for (double ox : xCandidates) {
+					double abs = Math.abs(ox - mx);
+					if (abs < bestDx) {
+						bestDx = abs;
+						bestSnapX = ox;
+						bestMyXSide = side;
+						hasSnapX = true;
+					}
 				}
 			}
 		}
 
-		// 画板坐标的 X 坐标（吸附目标）= bestSnapX
-		// 当前 X = mx，需要调整 = bestSnapX - mx = bestDx
-		// 实际要写回 bounds 的是 moving 的 X：moving.getX() + bestDx
+		// Y 方向：同上
+		double bestDy = Double.POSITIVE_INFINITY;
+		double bestSnapY = 0;
+		int bestMyYSide = 0;
+		boolean hasSnapY = false;
+		if (!yCandidates.isEmpty()) {
+			double[][] myYArr = {
+					{myTop, 0}, {myCenterY, 1}, {myBottom, 2}
+			};
+			for (double[] mine : myYArr) {
+				double my = mine[0];
+				int side = (int) mine[1];
+				for (double oy : yCandidates) {
+					double abs = Math.abs(oy - my);
+					if (abs < bestDy) {
+						bestDy = abs;
+						bestSnapY = oy;
+						bestMyYSide = side;
+						hasSnapY = true;
+					}
+				}
+			}
+		}
 
-		// 决定是否吸附（注意：myXs[0] 就是当前 mb.getX()，所以 dx = bestSnapX - mb.getX()）
+		// 吸附：把 bestSnap 写到对应的那条边（不是统一写左上角）
+		// 注意：先记下吸附前的边值，吸附后用于绘制辅助线位置（吸附后坐标 = bestSnap）
 		if (hasSnapX && bestDx <= SNAP_THRESHOLD) {
-			mb.setRect(bestSnapX, mb.getY(), mb.getWidth(), mb.getHeight());
+			double newX;
+			switch (bestMyXSide) {
+				case 0: newX = bestSnapX; break;                              // 左对齐
+				case 1: newX = bestSnapX - cardW / 2.0; break;                 // 中对齐
+				case 2: newX = bestSnapX - cardW; break;                       // 右对齐
+				default: newX = bestSnapX;
+			}
+			mb.setRect(newX, mb.getY(), cardW, cardH);
 		}
 		if (hasSnapY && bestDy <= SNAP_THRESHOLD) {
-			mb.setRect(mb.getX(), bestSnapY, mb.getWidth(), mb.getHeight());
+			double newY;
+			switch (bestMyYSide) {
+				case 0: newY = bestSnapY; break;                              // 上对齐
+				case 1: newY = bestSnapY - cardH / 2.0; break;                 // 中对齐
+				case 2: newY = bestSnapY - cardH; break;                       // 下对齐
+				default: newY = bestSnapY;
+			}
+			mb.setRect(mb.getX(), newY, cardW, cardH);
 		}
 
-		// 重新计算 bestDx/bestDy（吸附后可能更近或等于 0）；但我们要的是吸附"前"的对齐线，
-		// 否则看不出对齐关系，所以用吸附前的距离：
-		// 简化：先记录吸附前的距离，再吸附
-		// 上面的代码已经做了吸附，这里辅助线用吸附位置（bestSnap）即可
-
-		// 对齐辅助线（在 ALIGN_THRESHOLD 内显示）
-		// 画辅助线时需要先取吸附后位置对应的 X / Y：
+		// 对齐辅助线（在 ALIGN_THRESHOLD 内显示，画在吸附位置 = bestSnap）
 		if (hasSnapX && bestDx <= ALIGN_THRESHOLD) {
-			// 屏幕坐标 = 画板坐标 * zoom + transform.tx
 			double screenX = bestSnapX * zoomFactor + transform.getTranslateX();
 			Rectangle bounds = getBounds();
 			activeSnapGuideV = new Line2D.Double(screenX, 0, screenX, bounds.height);
