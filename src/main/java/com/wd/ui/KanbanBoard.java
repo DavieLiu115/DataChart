@@ -1317,19 +1317,25 @@ public class KanbanBoard extends JPanel {
 	/** 菜单项 hover/selected 时的文字颜色（蓝色） */
 	private static final Color MENU_HOVER_FOREGROUND = new Color(0x2470B0);
 
+	/** 是否已对 UIManager 设置过 menu 颜色（避免重复设置） */
+	private static boolean menuUiPatched = false;
+
 	/**
 	 * 创建一个与当前主题适配的 JPopupMenu（修复 hover 文字看不清）
 	 *
-	 * <p>Swing 默认 popup 菜单在 IntelliJ 深色主题下选中/hover 文字是白色，背景也是浅色，
-	 * 导致白字白底看不清楚。这里把 hover/selected 前景色固定为蓝色，背景沿用主题背景，
-	 * 两种主题下都能看清。</p>
+	 * <p>Swing 默认 popup 菜单在 IntelliJ 主题下选中/hover 文字是白色，背景看 L&F。
+	 * 解决：</p>
+	 * <ol>
+	 *   <li>首次调用时改 {@code UIManager} 的全局默认 {@code MenuItem.selectionForeground/Background}，
+	 *       让 L&F 在自绘时读取这个颜色</li>
+	 *   <li>显式给每个菜单项 setForeground/Background 作为兜底</li>
+	 * </ol>
 	 */
 	private javax.swing.JPopupMenu buildStyledPopupMenu() {
+		patchMenuUiDefaults();
 		javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
-		// 菜单整体前景/背景
 		menu.setForeground(JBColor.foreground());
 		menu.setBackground(JBColor.background());
-		menu.putClientProperty("MenuItem.acceleratorForeground", MENU_HOVER_FOREGROUND);
 		return menu;
 	}
 
@@ -1337,13 +1343,43 @@ public class KanbanBoard extends JPanel {
 	 * 创建一个菜单项，hover/selected 文字颜色固定为蓝色（修复白字问题）
 	 */
 	private javax.swing.JMenuItem buildStyledMenuItem(String label) {
+		patchMenuUiDefaults();
 		javax.swing.JMenuItem item = new javax.swing.JMenuItem(label);
 		item.setForeground(JBColor.foreground());
 		item.setBackground(JBColor.background());
-		// hover/selected 时用蓝色文字 + 主题背景
+		item.setOpaque(true);
+		// 显式 set selection 颜色，部分 L&F 仍然读这些
+		item.setSelected(false);
 		item.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
 		item.putClientProperty("MenuItem.selectionBackground", JBColor.background());
 		return item;
+	}
+
+	/**
+	 * 改 {@code UIManager} 的全局 menu 默认值，覆盖 L&F 的硬编码白色
+	 *
+	 * <p>这是修复"白字白底"问题的关键：Swing 的 {@code BasicMenuItemUI} 在
+	 * paintMenuItem 时优先读 {@code UIManager.get("MenuItem.selectionForeground")}，
+	 * 如果 L&F 没显式覆盖（例如 IntelliJ 的合成 L&F），就会拿到默认白色。
+	 * 改全局默认值后，所有 menuItem 的 hover 文字都会用蓝色。</p>
+	 */
+	private void patchMenuUiDefaults() {
+		if (menuUiPatched) {
+			return;
+		}
+		javax.swing.UIDefaults defaults = javax.swing.UIManager.getDefaults();
+		defaults.put("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		defaults.put("MenuItem.selectionBackground", JBColor.background());
+		defaults.put("Menu.selectionForeground", MENU_HOVER_FOREGROUND);
+		defaults.put("Menu.selectionBackground", JBColor.background());
+		defaults.put("MenuItem.acceleratorSelectionForeground", MENU_HOVER_FOREGROUND);
+		defaults.put("MenuItem.acceleratorForeground", MENU_HOVER_FOREGROUND);
+		// CheckBoxMenuItem / RadioButtonMenuItem 也要改
+		defaults.put("CheckBoxMenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		defaults.put("CheckBoxMenuItem.selectionBackground", JBColor.background());
+		defaults.put("RadioButtonMenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		defaults.put("RadioButtonMenuItem.selectionBackground", JBColor.background());
+		menuUiPatched = true;
 	}
 
 	/**
