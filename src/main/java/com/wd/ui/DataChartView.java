@@ -12,8 +12,8 @@ import org.jetbrains.annotations.Nullable;
  */
 public class DataChartView {
 
-	private final JPanel rootPanel;
-	private final Project project;
+	private JPanel rootPanel;
+	private Project project;
 
 	public DataChartView(@Nullable Project project) {
 		this.project = project;
