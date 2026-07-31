@@ -218,9 +218,9 @@ public class TableDropHandler implements DnDTarget {
 	 */
 	private String getDataSourceName(Object dbTable) {
 		try {
-			Object dataSource = dbElementClass.getMethod("getDataSource").invoke(dbTable);
+			Object dataSource = invoke(dbElementClass.getMethod("getDataSource"), dbTable);
 			if (dataSource != null) {
-				Object name = dataSource.getClass().getMethod("getName").invoke(dataSource);
+				Object name = invoke(dataSource.getClass().getMethod("getName"), dataSource);
 				return name == null ? "" : name.toString();
 			}
 		} catch (Exception e) {
@@ -243,10 +243,23 @@ public class TableDropHandler implements DnDTarget {
 				LOG.warn("getName method not found on DbElement");
 				return null;
 			}
-			Object name = m.invoke(dbTable);
+			Object name = invoke(m, dbTable);
 			return name == null ? null : name.toString();
 		} catch (Exception e) {
 			LOG.warn("getName failed", e);
+			return null;
+		}
+	}
+
+	/**
+	 * 反射调用方法（跨模块需 setAccessible，否则 IllegalAccessException）
+	 */
+	private static Object invoke(java.lang.reflect.Method method, Object target, Object... args) {
+		try {
+			method.setAccessible(true);
+			return method.invoke(target, args);
+		} catch (Exception e) {
+			LOG.warn("invoke failed: " + method.getName(), e);
 			return null;
 		}
 	}

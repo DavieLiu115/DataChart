@@ -350,7 +350,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static Object invokeStatic(Class<?> clazz, String method, Class<?> argType, Object arg) {
 		try {
 			Method m = clazz.getMethod(method, argType);
-			return m.invoke(null, arg);
+			return invokeMethod(m, null, arg);
 		} catch (Exception e) {
 			LOG.warn("invokeStatic failed: " + clazz.getSimpleName() + "." + method, e);
 			return null;

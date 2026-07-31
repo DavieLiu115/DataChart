@@ -442,6 +442,14 @@ public class KanbanCard {
 			g2d.drawString("... 共 " + columns.size() + " 列",
 					leftX, (int) maxBodyY);
 		}
+
+		// 最后一行下方的分隔线（与上方各行分隔线一致，闭合卡片 body）
+		if (rowCount > 0) {
+			double lastRowBottom = bodyTop + rowCount * rowHeight;
+			g2d.setColor(separatorColor);
+			g2d.drawLine((int) bounds.getX(), (int) lastRowBottom,
+					(int) (bounds.getX() + bounds.getWidth()), (int) lastRowBottom);
+		}
 	}
 
 	/**
