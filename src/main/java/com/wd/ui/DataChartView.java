@@ -5,6 +5,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SearchTextField;
 import com.wd.icon.PluginIcons;
+import java.awt.BorderLayout;
 import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -26,8 +27,8 @@ public class DataChartView extends DialogWrapper {
 	private SearchTextField searchTextField;
 	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
-	private JButton searchButton;
 	private JPanel dataView;
+	private KanbanBoard kanbanBoard;
 	private Project project;
 
 	public DataChartView(@Nullable Project project) {
@@ -36,12 +37,25 @@ public class DataChartView extends DialogWrapper {
 		init();
 		setupHeaderTool();
 		setupSearchField();
-		// TODO: 在此处添加图形编辑器的具体 UI 组件（画布、工具栏等）
+		initKanbanBoard();
 
-		searchButton.setIcon(PluginIcons.search);
 		fullScreamButton.setIcon(PluginIcons.fullScream);
 		exportPDFButton.setIcon(PluginIcons.export);
 		exportPictureButton.setIcon(PluginIcons.image);
+	}
+
+	/**
+	 * 初始化看板（占用 dataView 区域）
+	 */
+	private void initKanbanBoard() {
+		if (dataView == null) {
+			return;
+		}
+		dataView.setLayout(new BorderLayout());
+		kanbanBoard = new KanbanBoard(project);
+		dataView.add(kanbanBoard, BorderLayout.CENTER);
+		// 加载示例卡片（后续可改为从 .datachart JSON 解析）
+		kanbanBoard.loadSampleData();
 	}
 
 	/**
@@ -65,7 +79,6 @@ public class DataChartView extends DialogWrapper {
 		searchTextField.setToolTipText("Please input search content");
 		searchTextField.getTextEditor().getEmptyText().setText("Search");
 		searchTextField.setHistorySize(10);
-		searchButton.addActionListener(e -> doSearch());
 		searchTextField.getTextEditor().addActionListener(e -> doSearch());
 	}
 
