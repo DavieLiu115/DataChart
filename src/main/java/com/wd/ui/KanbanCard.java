@@ -48,6 +48,9 @@ public class KanbanCard {
 	/** 选中状态 */
 	private boolean selected;
 
+	/** 选中的行（-2 表示未选中，-1 表示表卡片整体被选中；>=0 表示具体列行） */
+	private int selectedRowIndex = -2;
+
 	// 样式
 	private int headerHeight = 28;
 	private int padding = 10;
@@ -73,12 +76,24 @@ public class KanbanCard {
 	private static final Color TEXT_DARK = new Color(0x333333);
 	private static final Color TEXT_LIGHT = new Color(0xDDDDDD);
 	private static final Color COMMENT_COLOR = new Color(0x888888);
+	/** 表头背景颜色（浅色主题，浅蓝） */
+	private static final Color HEADER_BG_LIGHT = new Color(0xE8F1FB);
+	/** 表头背景颜色（深色主题，青蓝） */
+	private static final Color HEADER_BG_DARK = new Color(0x2C5F8D);
+	/** 表头文字颜色（浅色主题，黑色） */
+	private static final Color HEADER_TEXT_LIGHT = new Color(0x222222);
+	/** 表头文字颜色（深色主题，浅白） */
+	private static final Color HEADER_TEXT_DARK = new Color(0xEEEEEE);
 	/** 列名字体颜色（黑色，浅色主题）/ 浅白（深色主题） */
 	private static final Color COLUMN_NAME_COLOR = new Color(0x222222);
 	private static final Color COLUMN_NAME_COLOR_DARK = new Color(0xFFFFFF);
 	/** 类型字体颜色（蓝色，浅色主题）/ 浅蓝（深色主题） */
 	private static final Color TYPE_COLOR = new Color(0x2470B0);
 	private static final Color TYPE_COLOR_DARK = new Color(0x6CB0F5);
+	/** 行选中高亮背景色（粉色，参考 DataHelper） */
+	private static final Color ROW_HIGHLIGHT_COLOR = new Color(0xFFB6E1);
+	/** 行选中高亮背景色（橙色，参考 DataHelper） */
+	private static final Color ROW_HIGHLIGHT_COLOR_ORANGE = new Color(0xFF9F5B);
 
 	/**
 	 * 构造方法（图表模式）
@@ -171,6 +186,73 @@ public class KanbanCard {
 		this.selected = selected;
 	}
 
+	public int getSelectedRowIndex() {
+		return selectedRowIndex;
+	}
+
+	public void setSelectedRowIndex(int index) {
+		this.selectedRowIndex = index;
+	}
+
+	/**
+	 * 获取列行在画板坐标系的右侧点（用于连线起点）
+	 *
+	 * @param rowIndex 行索引（0-based，对应 columns 列表）
+	 * @return 行右侧点，若行索引越界返回 null
+	 */
+	public java.awt.geom.Point2D getRowRight(int rowIndex) {
+		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
+			return null;
+		}
+		int rowHeight = 18;
+		double rowCenterY = bounds.getY() + headerHeight + rowIndex * rowHeight + rowHeight / 2.0;
+		double rightX = bounds.getX() + bounds.getWidth();
+		return new java.awt.geom.Point2D.Double(rightX, rowCenterY);
+	}
+
+	/**
+	 * 获取列行在画板坐标系的左侧点（用于连线终点）
+	 */
+	public java.awt.geom.Point2D getRowLeft(int rowIndex) {
+		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
+			return null;
+		}
+		int rowHeight = 18;
+		double rowCenterY = bounds.getY() + headerHeight + rowIndex * rowHeight + rowHeight / 2.0;
+		double leftX = bounds.getX();
+		return new java.awt.geom.Point2D.Double(leftX, rowCenterY);
+	}
+
+	/**
+	 * 根据画板坐标获取行索引（-2 表示未命中，-1 表示命中 header）
+	 *
+	 * @param boardX 画板 x 坐标
+	 * @param boardY 画板 y 坐标
+	 * @return 行索引
+	 */
+	public int getRowIndexAt(double boardX, double boardY) {
+		if (tableInfo == null) {
+			return -2;
+		}
+		double x = bounds.getX();
+		double y = bounds.getY();
+		double w = bounds.getWidth();
+		double h = bounds.getHeight();
+		if (boardX < x || boardX > x + w || boardY < y || boardY > y + h) {
+			return -2; // 不在卡片内
+		}
+		if (boardY < y + headerHeight) {
+			return -1; // header 区域
+		}
+		int rowHeight = 18;
+		double bodyTop = y + headerHeight;
+		int rowIndex = (int) ((boardY - bodyTop) / rowHeight);
+		if (rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
+			return -2;
+		}
+		return rowIndex;
+	}
+
 	/**
 	 * 根据图表类型返回 header 颜色
 	 */
@@ -231,7 +313,7 @@ public class KanbanCard {
 				8, 8);
 
 		// Header 区域
-		drawHeader(g2d, Color.WHITE);
+		drawHeader(g2d, isDark);
 
 		// 边框
 		g2d.setColor(border);
@@ -313,7 +395,7 @@ public class KanbanCard {
 				8, 8);
 
 		// Header 区域
-		drawHeader(g2d, Color.WHITE);
+		drawHeader(g2d, isDark);
 
 		// 边框
 		g2d.setColor(border);
@@ -394,6 +476,16 @@ public class KanbanCard {
 			g2d.drawLine((int) bounds.getX(), (int) rowTop,
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
+			// 选中行高亮背景（在分隔线之后画，覆盖在卡片背景上）
+			if (i == selectedRowIndex) {
+				g2d.setColor(ROW_HIGHLIGHT_COLOR);
+				g2d.fillRect(
+						(int) bounds.getX() + 1,
+						(int) rowTop + 1,
+						(int) bounds.getWidth() - 2,
+						rowHeight - 1);
+			}
+
 			// 1. 字段图标（按 主键/可空/索引 5 种组合）
 			int iconX = leftX;
 			int iconY = (int) (rowCenterY - 7);
@@ -455,9 +547,10 @@ public class KanbanCard {
 	/**
 	 * 绘制通用 Header（圆角彩色顶条）
 	 */
-	private void drawHeader(Graphics2D g2d, Color textColor) {
-		// Header 区域（顶部彩色条）
-		g2d.setColor(getHeaderColor());
+	private void drawHeader(Graphics2D g2d, boolean isDark) {
+		// Header 背景（按主题选择，不按 type 区分）
+		Color headerBg = isDark ? HEADER_BG_DARK : HEADER_BG_LIGHT;
+		g2d.setColor(headerBg);
 		g2d.fillRoundRect(
 				(int) bounds.getX(),
 				(int) bounds.getY(),

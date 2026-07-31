@@ -10,6 +10,8 @@ import com.wd.db.TableDropHandler;
 import com.wd.db.TableInfo;
 import com.wd.db.TableMetadataService;
 import com.wd.model.ChartData;
+import com.wd.model.ChartRelation;
+import com.wd.model.RelationType;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -67,6 +69,17 @@ public class KanbanBoard extends JPanel {
 	/** 当前选中的卡片 */
 	private KanbanCard selectedCard = null;
 
+	/** 连线列表 */
+	private final List<Connection> connections = new ArrayList<>();
+
+	/** 连线模式：源卡片和源行 */
+	private KanbanCard connectionSource = null;
+	private int connectionSourceRow = -2;
+	/** 连线模式：当前鼠标位置（画板坐标） */
+	private Point2D connectionCurrentPoint = null;
+	/** 连线模式：临时预览线 */
+	private boolean isConnecting = false;
+
 	/** 是否显示网格 */
 	private boolean showGrid = true;
 
@@ -75,6 +88,20 @@ public class KanbanBoard extends JPanel {
 
 	/** 卡片默认尺寸 */
 	private static final double DEFAULT_CARD_WIDTH = 200;
+
+	/** 连线颜色集合（每次连线从色板循环取一个） */
+	private static final java.awt.Color[] CONNECTION_COLOR_PALETTE = {
+			new Color(0xFF69B4), // 粉色
+			new Color(0xFF9F5B), // 橙色
+			new Color(0x9013FE), // 紫色
+			new Color(0x2470B0), // 蓝色
+			new Color(0x7ED321), // 绿色
+			new Color(0xF5A623), // 黄色
+			new Color(0xE74C3C)  // 红色
+	};
+
+	/** 当前连线颜色索引（循环分配） */
+	private int connectionColorIndex = 0;
 	private static final double DEFAULT_CARD_HEIGHT = 130;
 	private static final double CARD_HSPACE = 30;
 	private static final double CARD_VSPACE = 30;
@@ -159,10 +186,24 @@ public class KanbanBoard extends JPanel {
 
 				KanbanCard card = findCardAt(e.getPoint());
 				if (card != null) {
-					// 点击了卡片：开始拖拽卡片
+					// 点击了卡片：检查是否点击了行 → 进入连线模式
+					Point2D transformedPoint = transformPoint(e.getPoint());
+					int rowIndex = card.getRowIndexAt(
+							transformedPoint.getX(), transformedPoint.getY());
+					if (rowIndex >= 0) {
+						// 点到某一行：开始连线（源 = 该行）
+						connectionSource = card;
+						connectionSourceRow = rowIndex;
+						card.setSelectedRowIndex(rowIndex);
+						connectionCurrentPoint = transformedPoint;
+						isConnecting = true;
+						setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+						repaint();
+						return;
+					}
+					// 否则：拖拽卡片
 					draggedCard = card;
 					selectedCard = card;
-					Point2D transformedPoint = transformPoint(e.getPoint());
 					dragOffset.setLocation(
 							transformedPoint.getX() - card.getBounds().getX(),
 							transformedPoint.getY() - card.getBounds().getY());
@@ -185,9 +226,31 @@ public class KanbanBoard extends JPanel {
 				boolean wasDraggingCard = draggedCard != null;
 				isDraggingBoard = false;
 				draggedCard = null;
+
+				// 连线模式释放：尝试建立连接
+				if (isConnecting) {
+					Point2D transformedPoint = transformPoint(e.getPoint());
+					KanbanCard targetCard = findCardAt(e.getPoint());
+					if (targetCard != null && targetCard != connectionSource) {
+						int targetRow = targetCard.getRowIndexAt(
+								transformedPoint.getX(), transformedPoint.getY());
+						if (targetRow >= 0) {
+							addConnection(connectionSource, connectionSourceRow,
+									targetCard, targetRow);
+						}
+					}
+					// 退出连线模式（清除所有行高亮）
+					if (connectionSource != null) {
+						connectionSource.setSelectedRowIndex(-2);
+					}
+					connectionSource = null;
+					connectionSourceRow = -2;
+					connectionCurrentPoint = null;
+					isConnecting = false;
+				}
+
 				setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				repaint();
-				// 如果拖拽过卡片，标记看板内容已变更（位置变了）
 				if (wasDraggingCard) {
 					notifyBoardChanged();
 				}
@@ -195,7 +258,27 @@ public class KanbanBoard extends JPanel {
 
 			@Override
 			public void mouseDragged(MouseEvent e) {
-				if (draggedCard != null) {
+				if (isConnecting) {
+					// 连线模式：更新预览线终点，并高亮目标行
+					connectionCurrentPoint = transformPoint(e.getPoint());
+					KanbanCard targetCard = findCardAt(e.getPoint());
+					// 清除所有卡片的高亮
+					for (KanbanCard c : cards) {
+						c.setSelectedRowIndex(-2);
+					}
+					// 高亮源行 + 目标行
+					if (connectionSource != null) {
+						connectionSource.setSelectedRowIndex(connectionSourceRow);
+					}
+					if (targetCard != null && targetCard != connectionSource) {
+						Point2D tp = transformPoint(e.getPoint());
+						int targetRow = targetCard.getRowIndexAt(tp.getX(), tp.getY());
+						if (targetRow >= 0) {
+							targetCard.setSelectedRowIndex(targetRow);
+						}
+					}
+					repaint();
+				} else if (draggedCard != null) {
 					// 拖拽卡片
 					try {
 						Point2D transformedPoint = transformPoint(e.getPoint());
@@ -245,10 +328,59 @@ public class KanbanBoard extends JPanel {
 
 			@Override
 			public void mouseMoved(MouseEvent e) {
+				if (isConnecting) {
+					return;
+				}
 				KanbanCard card = findCardAt(e.getPoint());
 				setCursor(card != null
 						? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
 						: Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
+
+				// 悬停高亮 + tooltip
+				if (card != null) {
+					Point2D transformedPoint = transformPoint(e.getPoint());
+					int rowIndex = card.getRowIndexAt(
+							transformedPoint.getX(), transformedPoint.getY());
+					// 清除所有行高亮
+					for (KanbanCard c : cards) {
+						c.setSelectedRowIndex(-2);
+					}
+					if (rowIndex >= 0) {
+						card.setSelectedRowIndex(rowIndex);
+						// 设置 tooltip 显示完整注释
+						com.wd.db.TableInfo ti = card.getTableInfo();
+						if (ti != null && rowIndex < ti.getColumns().size()) {
+							com.wd.db.ColumnInfo col = ti.getColumns().get(rowIndex);
+							String tip = buildColumnTooltip(col);
+							KanbanBoard.this.setToolTipText(tip);
+						}
+					} else if (rowIndex == -1) {
+						// header 区域：tooltip 显示表注释
+						com.wd.db.TableInfo ti = card.getTableInfo();
+						if (ti != null) {
+							String tip = "表: " + ti.getName() +
+									(ti.getComment() == null || ti.getComment().isEmpty()
+											? "" : "\n注释: " + ti.getComment());
+							KanbanBoard.this.setToolTipText(tip);
+						}
+					} else {
+						KanbanBoard.this.setToolTipText(null);
+					}
+					repaint();
+				} else {
+					KanbanBoard.this.setToolTipText(null);
+					repaint();
+				}
+			}
+
+			// 给 mouseDragged 等已存在的 handler 添加 tooltip 清理逻辑，避免拖拽时遗留
+			private void clearTooltipAndHighlight() {
+				KanbanBoard.this.setToolTipText(null);
+				if (!isConnecting) {
+					for (KanbanCard c : cards) {
+						c.setSelectedRowIndex(-2);
+					}
+				}
 			}
 		};
 
@@ -322,6 +454,8 @@ public class KanbanBoard extends JPanel {
 		}
 
 		cards.remove(card);
+		// 同时移除涉及该表的所有连线
+		connections.removeIf(conn -> conn.getSource() == card || conn.getTarget() == card);
 		if (selectedCard == card) {
 			selectedCard = null;
 		}
@@ -333,7 +467,13 @@ public class KanbanBoard extends JPanel {
 	 * 检查某张表是否存在连线关系
 	 */
 	private boolean hasRelationsFor(String cardId) {
-		return false; // TODO: 连线功能尚未实现，暂返回 false
+		for (Connection conn : connections) {
+			if (cardId.equals(conn.getSource().getId())
+					|| cardId.equals(conn.getTarget().getId())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -528,12 +668,36 @@ public class KanbanBoard extends JPanel {
 			drawGrid(g2d);
 		}
 
-		// 2. 绘制所有卡片
+		// 2. 绘制所有连线（在卡片下方）
+		for (Connection conn : connections) {
+			conn.draw(g2d);
+		}
+
+		// 3. 绘制所有卡片
 		boolean dark = isDarkTheme();
 		for (KanbanCard card : cards) {
 			boolean isSelected = (card == selectedCard);
 			card.setSelected(isSelected);
 			card.draw(g2d, dark);
+		}
+
+		// 4. 绘制连线预览（鼠标跟随）
+		if (isConnecting && connectionSource != null && connectionCurrentPoint != null) {
+			Point2D sourcePoint = connectionSource.getRowRight(connectionSourceRow);
+			if (sourcePoint != null) {
+				g2d.setColor(Color.PINK);
+				g2d.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+				double dx = Math.abs(connectionCurrentPoint.getX() - sourcePoint.getX());
+				double ctrlX1 = sourcePoint.getX() + dx / 2.0;
+				double ctrlY1 = sourcePoint.getY();
+				double ctrlX2 = connectionCurrentPoint.getX() - dx / 2.0;
+				double ctrlY2 = connectionCurrentPoint.getY();
+				g2d.draw(new java.awt.geom.CubicCurve2D.Double(
+						sourcePoint.getX(), sourcePoint.getY(),
+						ctrlX1, ctrlY1,
+						ctrlX2, ctrlY2,
+						connectionCurrentPoint.getX(), connectionCurrentPoint.getY()));
+			}
 		}
 
 		g2d.dispose();
@@ -656,6 +820,63 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
+	 * 添加连线（自动分配颜色）
+	 *
+	 * @param source    源卡片
+	 * @param sourceRow 源行索引
+	 * @param target    目标卡片
+	 * @param targetRow 目标行索引
+	 * @return 新创建的连接，重复则返回 null
+	 */
+	public Connection addConnection(KanbanCard source, int sourceRow,
+			KanbanCard target, int targetRow) {
+		if (source == null || target == null
+				|| source == target || sourceRow < 0 || targetRow < 0) {
+			return null;
+		}
+		// 防止重复连线
+		for (Connection conn : connections) {
+			if (conn.getSource() == source && conn.getSourceRow() == sourceRow
+					&& conn.getTarget() == target && conn.getTargetRow() == targetRow) {
+				return null;
+			}
+		}
+		Color color = CONNECTION_COLOR_PALETTE[connectionColorIndex
+				% CONNECTION_COLOR_PALETTE.length];
+		connectionColorIndex++;
+		Connection conn = new Connection(source, sourceRow, target, targetRow, color);
+		connections.add(conn);
+		repaint();
+		notifyBoardChanged();
+		return conn;
+	}
+
+	/**
+	 * 构建字段的 tooltip（完整字段信息）
+	 */
+	private String buildColumnTooltip(com.wd.db.ColumnInfo col) {
+		StringBuilder sb = new StringBuilder();
+		sb.append("<html>");
+		sb.append("列名: <b>").append(col.getName()).append("</b><br/>");
+		sb.append("类型: ").append(col.getType()).append("<br/>");
+		sb.append("主键: ").append(col.isPrimaryKey() ? "是" : "否").append("<br/>");
+		sb.append("可空: ").append(col.isNullable() ? "是" : "否").append("<br/>");
+		sb.append("索引: ").append(col.isIndexed() ? "是" : "否").append("<br/>");
+		if (col.getComment() != null && !col.getComment().isEmpty()) {
+			sb.append("注释: ").append(col.getComment());
+		}
+		sb.append("</html>");
+		return sb.toString();
+	}
+
+	/**
+	 * 获取所有连线
+	 */
+	public List<Connection> getConnections() {
+		return connections;
+	}
+
+	/**
 	 * 将看板状态序列化为图数据模型（用于保存到 .datachart）
 	 *
 	 * @return ChartData，包含所有表卡片及其位置、列信息
@@ -681,6 +902,14 @@ public class KanbanBoard extends JPanel {
 			// 保存列信息（避免重新打开时重新查数据库）
 			model.setColumns(new java.util.ArrayList<>(info.getColumns()));
 			data.getTables().add(model);
+		}
+		// 保存连线
+		for (Connection conn : connections) {
+			ChartRelation rel = new ChartRelation(
+					conn.getSource().getId(), Integer.toString(conn.getSourceRow()),
+					conn.getTarget().getId(), Integer.toString(conn.getTargetRow()),
+					RelationType.UNKNOWN);
+			data.getRelations().add(rel);
 		}
 		return data;
 	}
@@ -722,7 +951,53 @@ public class KanbanBoard extends JPanel {
 					model.getX(), model.getY(), model.getWidth(), model.getHeight());
 			cards.add(card);
 		}
+
+		// 恢复连线：根据 relations 中的 fromCardId/fromColumn + toCardId/toColumn 找到对应卡片/行
+		connections.clear();
+		connectionColorIndex = 0;
+		if (data.getRelations() != null) {
+			for (ChartRelation rel : data.getRelations()) {
+				KanbanCard src = findCardById(rel.getFromCardId());
+				KanbanCard tgt = findCardById(rel.getToCardId());
+				if (src == null || tgt == null) {
+					continue;
+				}
+				int srcRow = parseRowIndex(rel.getFromColumn());
+				int tgtRow = parseRowIndex(rel.getToColumn());
+				if (srcRow < 0 || tgtRow < 0) {
+					continue;
+				}
+				addConnection(src, srcRow, tgt, tgtRow);
+			}
+		}
+
 		selectedCard = null;
 		repaint();
+	}
+
+	/**
+	 * 根据卡片 ID 查找卡片
+	 */
+	private KanbanCard findCardById(String id) {
+		if (id == null) {
+			return null;
+		}
+		for (KanbanCard c : cards) {
+			if (id.equals(c.getId())) {
+				return c;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 从字符串解析行索引
+	 */
+	private int parseRowIndex(String s) {
+		try {
+			return Integer.parseInt(s);
+		} catch (Exception e) {
+			return -1;
+		}
 	}
 }
