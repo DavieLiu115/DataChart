@@ -20,19 +20,25 @@ import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.StringSelection;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.awt.geom.AffineTransform;
+import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import javax.swing.JPanel;
 
 /**
@@ -80,6 +86,17 @@ public class KanbanBoard extends JPanel {
 	/** 连线预览高亮（鼠标拖动时临时高亮源/目标行） */
 	private final Map<KanbanCard, Map<Integer, Color>> previewHighlightRows = new HashMap<>();
 
+	/** 当前激活的"用户选中列"（用于触发关联列高亮） */
+	private KanbanCard activeHighlightCard = null;
+	private int activeHighlightRow = -1;
+
+	/** 关联列集合：与 activeHighlight 构成连线的对方列（card, rowIndex） */
+	private final Set<String> relatedRowKeys = new HashSet<>();
+
+	/** 当前帧需要绘制的对齐辅助线（屏幕坐标，null 表示无） */
+	private Line2D.Double activeSnapGuideV = null;
+	private Line2D.Double activeSnapGuideH = null;
+
 	/** 当前选中的连线 */
 	private Connection selectedConnection = null;
 
@@ -118,8 +135,21 @@ public class KanbanBoard extends JPanel {
 	/** 行选中高亮颜色（用户点击选中行时使用） */
 	private static final Color SELECTED_ROW_COLOR = new Color(0xFE9933);
 
+	/** 关联列高亮颜色（选中某列时，与之有连线的另一列也用此色高亮） */
+	private static final Color RELATED_ROW_COLOR = new Color(0xFD9933);
+
 	/** 连线模式临时高亮颜色（半透明粉色，标识当前正在连的行） */
 	private static final Color CONNECTION_PREVIEW_COLOR = new Color(0xFFB6E1);
+
+	/** 对齐辅助线颜色（深色主题下稍亮，浅色主题下稍深） */
+	private static final Color ALIGN_GUIDE_COLOR_LIGHT = new Color(0xFE9933);
+	private static final Color ALIGN_GUIDE_COLOR_DARK = new Color(0xFFB266);
+
+	/** 磁吸阈值（画板坐标像素），水平/垂直方向独立判断 */
+	private static final double SNAP_THRESHOLD = 8.0;
+
+	/** 对齐辅助线触发阈值（比磁吸稍大，便于提前显示） */
+	private static final double ALIGN_THRESHOLD = 10.0;
 	private static final double DEFAULT_CARD_HEIGHT = 130;
 	private static final double CARD_HSPACE = 30;
 	private static final double CARD_VSPACE = 30;
@@ -221,18 +251,42 @@ public class KanbanBoard extends JPanel {
 					Point2D transformedPoint = transformPoint(e.getPoint());
 					int rowIndex = card.getRowIndexAt(
 							transformedPoint.getX(), transformedPoint.getY());
+					if (rowIndex == -1) {
+						// header 区域：右键统一弹"复制表名/复制注释"菜单
+						if (e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3) {
+							showHeaderContextMenu(card, e.getPoint());
+						}
+						// header 区域允许拖拽整张卡片
+						draggedCard = card;
+						selectedCard = card;
+						dragOffset.setLocation(
+								transformedPoint.getX() - card.getBounds().getX(),
+								transformedPoint.getY() - card.getBounds().getY());
+						setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+						repaint();
+						return;
+					}
 					if (rowIndex >= 0) {
 						// 点击了某一行
 						if (e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3) {
-							// 右键点击：开始连线
-							connectionSource = card;
-							connectionSourceRow = rowIndex;
-							connectionCurrentPoint = transformedPoint;
-							isConnecting = true;
-							setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
-							repaint();
+							// 右键点击：判断是左半（列名/类型）还是右半（注释）
+							double colNameRightX = card.getColumnNameRightX(rowIndex);
+							boolean isLeftHalf = colNameRightX > 0
+									&& transformedPoint.getX() <= colNameRightX;
+							if (isLeftHalf) {
+								// 左半：弹列名/注释菜单
+								showColumnContextMenu(card, rowIndex, e.getPoint());
+							} else {
+								// 右半：走连线模式（从行右拖出连线）
+								connectionSource = card;
+								connectionSourceRow = rowIndex;
+								connectionCurrentPoint = transformedPoint;
+								isConnecting = true;
+								setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+								repaint();
+							}
 						} else {
-							// 左键点击：切换普通选中（橙色 #FE9933）
+							// 左键点击：切换普通选中（橙色 #FE9933），并触发关联列高亮
 							toggleRowSelection(card, rowIndex);
 						}
 						return;
@@ -246,9 +300,10 @@ public class KanbanBoard extends JPanel {
 					setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
 					repaint();
 				} else {
-					// 点击空白区域：开始拖拽画板
+					// 点击空白区域：开始拖拽画板，同时清空列选中态
 					isDraggingBoard = true;
 					selectedCard = null;
+					clearActiveHighlight();
 					setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
 					repaint();
 				}
@@ -262,6 +317,9 @@ public class KanbanBoard extends JPanel {
 				boolean wasDraggingCard = draggedCard != null;
 				isDraggingBoard = false;
 				draggedCard = null;
+				// 清除对齐辅助线
+				activeSnapGuideV = null;
+				activeSnapGuideH = null;
 
 				// 连线模式释放：尝试建立连接
 				if (isConnecting) {
@@ -315,13 +373,17 @@ public class KanbanBoard extends JPanel {
 					}
 					repaint();
 				} else if (draggedCard != null) {
-					// 拖拽卡片
+					// 拖拽卡片（含磁吸 + 对齐辅助线）
 					try {
 						Point2D transformedPoint = transformPoint(e.getPoint());
 						double newX = transformedPoint.getX() - dragOffset.getX();
 						double newY = transformedPoint.getY() - dragOffset.getY();
 						Rectangle2D bounds = draggedCard.getBounds();
 						bounds.setRect(newX, newY, bounds.getWidth(), bounds.getHeight());
+
+						// 计算对齐辅助线 + 磁吸
+						applySnapAndGuides(draggedCard);
+
 						repaint();
 					} catch (Exception ex) {
 						ex.printStackTrace();
@@ -411,8 +473,9 @@ public class KanbanBoard extends JPanel {
 			 * 切换行选中状态（左键单击行时调用）
 			 *
 			 * <ul>
-			 *   <li>未选中 → 选中（橙色 #FE9933），同时清除其他表的用户选中</li>
-			 *   <li>已选中 → 取消选中</li>
+			 *   <li>未选中 → 选中（橙色 #FE9933），同时清除其他表的用户选中；
+			 *       并将本列设为激活高亮，所有与之有连线的列也高亮（橙色 #FD9933）</li>
+			 *   <li>已选中 → 取消选中，并清空关联列高亮</li>
 			 *   <li>被连线占用的行（不影响，computeLinkedRows 会自动管理）</li>
 			 * </ul>
 			 */
@@ -421,6 +484,9 @@ public class KanbanBoard extends JPanel {
 				if (highlighted.contains(rowIndex)) {
 					// 已是用户选中 → 取消
 					highlighted.remove(rowIndex);
+					if (activeHighlightCard == card && activeHighlightRow == rowIndex) {
+						clearActiveHighlight();
+					}
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				} else {
 					// 切换：清除所有卡的用户选中，再设当前
@@ -428,6 +494,8 @@ public class KanbanBoard extends JPanel {
 						c.getHighlightedRows().clear();
 					}
 					highlighted.add(rowIndex);
+					// 设置激活高亮：触发关联列计算
+					setActiveHighlight(card, rowIndex);
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				}
 				repaint();
@@ -508,6 +576,10 @@ public class KanbanBoard extends JPanel {
 		connections.removeIf(conn -> conn.getSource() == card || conn.getTarget() == card);
 		if (selectedCard == card) {
 			selectedCard = null;
+		}
+		// 如果激活高亮指向被删除的卡，清掉
+		if (activeHighlightCard == card) {
+			clearActiveHighlight();
 		}
 		repaint();
 		notifyBoardChanged();
@@ -735,12 +807,36 @@ public class KanbanBoard extends JPanel {
 		boolean dark = isDarkTheme();
 		// 重新计算每张卡的连线占用行（参考 DataHelper，绘制前动态计算，不依赖元素状态）
 		Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = computeLinkedRows();
+		// 需求 2：刷新 activeHighlight → relatedRowKeys
+		refreshRelatedRows();
+		// 先清掉所有卡的临时行高亮色
+		for (KanbanCard c : cards) {
+			c.clearActiveRowColors();
+		}
+		// 把"激活列本身" + "关联列" 都标记为 RELATED_ROW_COLOR，让 Connection 端点能拿到一致色
+		if (activeHighlightCard != null && activeHighlightRow >= 0) {
+			activeHighlightCard.setActiveRowColor(activeHighlightRow, RELATED_ROW_COLOR);
+		}
+		for (String key : relatedRowKeys) {
+			RelatedRowPos rk = parseRelatedKeyById(key);
+			if (rk != null) {
+				rk.card.setActiveRowColor(rk.row, RELATED_ROW_COLOR);
+			}
+		}
 		for (KanbanCard card : cards) {
 			boolean isSelected = (card == selectedCard);
 			card.setSelected(isSelected);
-			// 合并：连线占用行 + 预览高亮行（预览覆盖连线仅在预览期间）
+			// 合并：连线占用行 + 关联列高亮 + 预览高亮行
+			// 优先级：用户选中（橙） > 预览高亮（粉） > 关联列（#FD9933） > 连线占用（线色）
 			Map<Integer, Color> merged = new HashMap<>(
 					linkedRowsCache.getOrDefault(card, Collections.emptyMap()));
+			// 关联列覆盖连线色（视觉上保持统一橙色，强调"相连"）
+			for (String key : relatedRowKeys) {
+				RelatedRowPos rk = parseRelatedKeyById(key);
+				if (rk != null && rk.card == card) {
+					merged.put(rk.row, RELATED_ROW_COLOR);
+				}
+			}
 			Map<Integer, Color> preview = previewHighlightRows.get(card);
 			if (preview != null) {
 				merged.putAll(preview);
@@ -768,6 +864,9 @@ public class KanbanBoard extends JPanel {
 		}
 
 		g2d.dispose();
+
+		// 5. 绘制对齐辅助线（在屏幕坐标下，覆盖在整个画板最上层）
+		drawSnapGuides(g);
 	}
 
 	/**
@@ -897,6 +996,14 @@ public class KanbanBoard extends JPanel {
 	 */
 	public Connection addConnection(KanbanCard source, int sourceRow,
 			KanbanCard target, int targetRow) {
+		return addConnection(source, sourceRow, target, targetRow, RelationType.UNKNOWN);
+	}
+
+	/**
+	 * 添加连线（指定关系类型）
+	 */
+	public Connection addConnection(KanbanCard source, int sourceRow,
+			KanbanCard target, int targetRow, RelationType relationType) {
 		if (source == null || target == null
 				|| source == target || sourceRow < 0 || targetRow < 0) {
 			return null;
@@ -911,7 +1018,7 @@ public class KanbanBoard extends JPanel {
 		Color color = CONNECTION_COLOR_PALETTE[connectionColorIndex
 				% CONNECTION_COLOR_PALETTE.length];
 		connectionColorIndex++;
-		Connection conn = new Connection(source, sourceRow, target, targetRow, color);
+		Connection conn = new Connection(source, sourceRow, target, targetRow, color, relationType);
 		connections.add(conn);
 		// 不再直接修改卡片高亮状态，绘制时由 computeLinkedRows() 动态推导
 		repaint();
@@ -980,7 +1087,7 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 在指定屏幕坐标处弹出连线右键菜单（删除）
+	 * 在指定屏幕坐标处弹出连线右键菜单（删除 / 关系类型）
 	 */
 	private void showConnectionContextMenu(Connection conn, java.awt.Point screenPoint) {
 		if (conn == null) {
@@ -988,13 +1095,47 @@ public class KanbanBoard extends JPanel {
 		}
 		selectedConnection = conn;
 		repaint();
-		javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
-		javax.swing.JMenuItem deleteItem = new javax.swing.JMenuItem("删除连线");
-		deleteItem.addActionListener(e -> {
-			removeConnection(conn);
-		});
+		javax.swing.JPopupMenu menu = buildStyledPopupMenu();
+
+		// --- 关系类型子菜单（需求 7）---
+		javax.swing.JMenu typeMenu = new javax.swing.JMenu("关系类型");
+		typeMenu.setForeground(JBColor.foreground());
+		typeMenu.setBackground(JBColor.background());
+		typeMenu.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		typeMenu.putClientProperty("MenuItem.selectionBackground", JBColor.background());
+		addRelationTypeItem(typeMenu, "一对一", RelationType.ONE_TO_ONE, conn);
+		addRelationTypeItem(typeMenu, "一对多", RelationType.ONE_TO_MANY, conn);
+		addRelationTypeItem(typeMenu, "多对一", RelationType.MANY_TO_ONE, conn);
+		addRelationTypeItem(typeMenu, "多对多", RelationType.MANY_TO_MANY, conn);
+		menu.add(typeMenu);
+
+		menu.addSeparator();
+
+		// --- 删除 ---
+		javax.swing.JMenuItem deleteItem = buildStyledMenuItem("删除连线");
+		deleteItem.addActionListener(e -> removeConnection(conn));
 		menu.add(deleteItem);
+
 		menu.show(this, screenPoint.x, screenPoint.y);
+	}
+
+	/**
+	 * 向关系类型菜单添加一项，并实现选中后修改连线端点形状
+	 */
+	private void addRelationTypeItem(javax.swing.JMenu parent, String label,
+			RelationType type, Connection conn) {
+		javax.swing.JCheckBoxMenuItem item = new javax.swing.JCheckBoxMenuItem(label);
+		item.setSelected(conn.getRelationType() == type);
+		item.setForeground(JBColor.foreground());
+		item.setBackground(JBColor.background());
+		item.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		item.putClientProperty("MenuItem.selectionBackground", JBColor.background());
+		item.addActionListener(e -> {
+			conn.setRelationType(type);
+			repaint();
+			notifyBoardChanged();
+		});
+		parent.add(item);
 	}
 
 	/**
@@ -1056,7 +1197,7 @@ public class KanbanBoard extends JPanel {
 			ChartRelation rel = new ChartRelation(
 					conn.getSource().getId(), Integer.toString(conn.getSourceRow()),
 					conn.getTarget().getId(), Integer.toString(conn.getTargetRow()),
-					RelationType.UNKNOWN);
+					conn.getRelationType());
 			data.getRelations().add(rel);
 		}
 		return data;
@@ -1123,7 +1264,9 @@ public class KanbanBoard extends JPanel {
 				if (srcRow < 0 || tgtRow < 0) {
 					continue;
 				}
-				addConnection(src, srcRow, tgt, tgtRow);
+				RelationType type = rel.getRelationType() == null
+						? RelationType.UNKNOWN : rel.getRelationType();
+				addConnection(src, srcRow, tgt, tgtRow, type);
 			}
 		}
 
@@ -1155,5 +1298,337 @@ public class KanbanBoard extends JPanel {
 		} catch (Exception e) {
 			return -1;
 		}
+	}
+
+	// ====================== 复制到剪贴板（需求 3、4） ======================
+
+	/**
+	 * 复制文本到系统剪贴板
+	 */
+	private void copyToClipboard(String text) {
+		if (text == null) {
+			return;
+		}
+		StringSelection selection = new StringSelection(text);
+		Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+		clipboard.setContents(selection, null);
+	}
+
+	/** 菜单项 hover/selected 时的文字颜色（蓝色） */
+	private static final Color MENU_HOVER_FOREGROUND = new Color(0x2470B0);
+
+	/**
+	 * 创建一个与当前主题适配的 JPopupMenu（修复 hover 文字看不清）
+	 *
+	 * <p>Swing 默认 popup 菜单在 IntelliJ 深色主题下选中/hover 文字是白色，背景也是浅色，
+	 * 导致白字白底看不清楚。这里把 hover/selected 前景色固定为蓝色，背景沿用主题背景，
+	 * 两种主题下都能看清。</p>
+	 */
+	private javax.swing.JPopupMenu buildStyledPopupMenu() {
+		javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+		// 菜单整体前景/背景
+		menu.setForeground(JBColor.foreground());
+		menu.setBackground(JBColor.background());
+		menu.putClientProperty("MenuItem.acceleratorForeground", MENU_HOVER_FOREGROUND);
+		return menu;
+	}
+
+	/**
+	 * 创建一个菜单项，hover/selected 文字颜色固定为蓝色（修复白字问题）
+	 */
+	private javax.swing.JMenuItem buildStyledMenuItem(String label) {
+		javax.swing.JMenuItem item = new javax.swing.JMenuItem(label);
+		item.setForeground(JBColor.foreground());
+		item.setBackground(JBColor.background());
+		// hover/selected 时用蓝色文字 + 主题背景
+		item.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		item.putClientProperty("MenuItem.selectionBackground", JBColor.background());
+		return item;
+	}
+
+	/**
+	 * 表头右键菜单（统一两项：复制表名 / 复制注释）
+	 *
+	 * <p>表头无论左半（表名）还是右半（注释）右键，都弹出相同的两个菜单项，
+	 * 注释为空时"复制注释"灰显。</p>
+	 */
+	private void showHeaderContextMenu(KanbanCard card, java.awt.Point screenPoint) {
+		if (card == null) {
+			return;
+		}
+		TableInfo info = card.getTableInfo();
+		if (info == null) {
+			return;
+		}
+		javax.swing.JPopupMenu menu = buildStyledPopupMenu();
+
+		javax.swing.JMenuItem copyName = buildStyledMenuItem("复制表名");
+		copyName.addActionListener(e -> copyToClipboard(info.getName()));
+		menu.add(copyName);
+
+		String comment = info.getComment();
+		javax.swing.JMenuItem copyComment = buildStyledMenuItem("复制注释");
+		copyComment.setEnabled(comment != null && !comment.isEmpty());
+		copyComment.addActionListener(e -> copyToClipboard(comment));
+		menu.add(copyComment);
+
+		menu.show(this, screenPoint.x, screenPoint.y);
+	}
+
+	/**
+	 * 列行右键菜单（仅左半 = 列名+类型 区域触发）
+	 *
+	 * <p>右半（注释区域）不弹菜单，交给原连线流程（从行右边缘拖出连线）。</p>
+	 */
+	private void showColumnContextMenu(KanbanCard card, int rowIndex, java.awt.Point screenPoint) {
+		if (card == null) {
+			return;
+		}
+		TableInfo info = card.getTableInfo();
+		if (info == null || rowIndex < 0 || rowIndex >= info.getColumns().size()) {
+			return;
+		}
+		ColumnInfo col = info.getColumns().get(rowIndex);
+
+		javax.swing.JPopupMenu menu = buildStyledPopupMenu();
+		javax.swing.JMenuItem copyName = buildStyledMenuItem("复制列名");
+		copyName.addActionListener(e -> copyToClipboard(col.getName()));
+		menu.add(copyName);
+
+		String comment = col.getComment();
+		javax.swing.JMenuItem copyComment = buildStyledMenuItem("复制注释");
+		copyComment.setEnabled(comment != null && !comment.isEmpty());
+		copyComment.addActionListener(e -> copyToClipboard(comment));
+		menu.add(copyComment);
+
+		menu.show(this, screenPoint.x, screenPoint.y);
+	}
+
+	// ====================== 关联列高亮（需求 2） ======================
+
+	/**
+	 * 关联列的解析结果：哪个 card 的哪一行需要高亮
+	 */
+	private static class RelatedRowPos {
+		final KanbanCard card;
+		final int row;
+
+		RelatedRowPos(KanbanCard card, int row) {
+			this.card = card;
+			this.row = row;
+		}
+	}
+
+	/**
+	 * 拼装关联列 key（用 cardId 而非 card 引用，避免删除卡片时 key 失效）
+	 */
+	private static String makeRelatedKey(KanbanCard card, int row) {
+		return card.getId() + "#" + row;
+	}
+
+	/**
+	 * 解析关联列 key（按 cardId 找到 card），用于设置临时行高亮
+	 */
+	private RelatedRowPos parseRelatedKeyById(String key) {
+		if (key == null) {
+			return null;
+		}
+		int hash = key.lastIndexOf('#');
+		if (hash < 0) {
+			return null;
+		}
+		String cardId = key.substring(0, hash);
+		int row;
+		try {
+			row = Integer.parseInt(key.substring(hash + 1));
+		} catch (NumberFormatException e) {
+			return null;
+		}
+		KanbanCard card = findCardById(cardId);
+		if (card == null) {
+			return null;
+		}
+		return new RelatedRowPos(card, row);
+	}
+
+	/**
+	 * 设置激活高亮（用户左键选中的列）
+	 */
+	private void setActiveHighlight(KanbanCard card, int row) {
+		this.activeHighlightCard = card;
+		this.activeHighlightRow = row;
+		refreshRelatedRows();
+	}
+
+	/**
+	 * 清空激活高亮（点击空白区域、取消选中、删除连线等）
+	 */
+	private void clearActiveHighlight() {
+		this.activeHighlightCard = null;
+		this.activeHighlightRow = -1;
+		relatedRowKeys.clear();
+	}
+
+	/**
+	 * 重新计算关联列集合
+	 *
+	 * <p>遍历所有连线，若一方命中 activeHighlight，则把另一方加入 relatedRowKeys。</p>
+	 */
+	private void refreshRelatedRows() {
+		relatedRowKeys.clear();
+		if (activeHighlightCard == null || activeHighlightRow < 0) {
+			return;
+		}
+		for (Connection conn : connections) {
+			if (conn.getSource() == activeHighlightCard
+					&& conn.getSourceRow() == activeHighlightRow) {
+				relatedRowKeys.add(makeRelatedKey(conn.getTarget(), conn.getTargetRow()));
+			}
+			if (conn.getTarget() == activeHighlightCard
+					&& conn.getTargetRow() == activeHighlightRow) {
+				relatedRowKeys.add(makeRelatedKey(conn.getSource(), conn.getSourceRow()));
+			}
+		}
+	}
+
+	// ====================== 磁吸 + 对齐辅助线（需求 6） ======================
+
+	/**
+	 * 拖拽过程中计算对齐 + 磁吸。
+	 *
+	 * <p>水平方向：把当前卡片的 左/中/右 与其它卡片的 左/中/右 对齐；</p>
+	 * <p>垂直方向：把当前卡片的 上/中/下 与其它卡片的 上/中/下 对齐。</p>
+	 *
+	 * <p>距离小于 SNAP_THRESHOLD 时直接吸附，否则只在 ALIGN_THRESHOLD 内显示辅助线。</p>
+	 *
+	 * @param moving 当前正在拖动的卡片
+	 */
+	private void applySnapAndGuides(KanbanCard moving) {
+		if (moving == null) {
+			activeSnapGuideV = null;
+			activeSnapGuideH = null;
+			return;
+		}
+		Rectangle2D mb = moving.getBounds();
+		double[] myXs = {mb.getX(), mb.getX() + mb.getWidth() / 2.0, mb.getX() + mb.getWidth()};
+		double[] myYs = {mb.getY(), mb.getY() + mb.getHeight() / 2.0, mb.getY() + mb.getHeight()};
+
+		double bestDx = Double.POSITIVE_INFINITY;
+		double bestSnapX = 0;
+		boolean hasSnapX = false;
+
+		double bestDy = Double.POSITIVE_INFINITY;
+		double bestSnapY = 0;
+		boolean hasSnapY = false;
+
+		// 找到所有候选对齐点（画板坐标）
+		List<Double> xCandidates = new ArrayList<>();
+		List<Double> yCandidates = new ArrayList<>();
+		for (KanbanCard other : cards) {
+			if (other == moving) {
+				continue;
+			}
+			Rectangle2D ob = other.getBounds();
+			xCandidates.add(ob.getX());
+			xCandidates.add(ob.getX() + ob.getWidth() / 2.0);
+			xCandidates.add(ob.getX() + ob.getWidth());
+			yCandidates.add(ob.getY());
+			yCandidates.add(ob.getY() + ob.getHeight() / 2.0);
+			yCandidates.add(ob.getY() + ob.getHeight());
+		}
+
+		// 水平：x 对齐
+		for (double mx : myXs) {
+			for (double ox : xCandidates) {
+				double dx = ox - mx;
+				double abs = Math.abs(dx);
+				if (abs < bestDx) {
+					bestDx = abs;
+					bestSnapX = ox;
+					hasSnapX = true;
+				}
+			}
+		}
+		// 垂直：y 对齐
+		for (double my : myYs) {
+			for (double oy : yCandidates) {
+				double dy = oy - my;
+				double abs = Math.abs(dy);
+				if (abs < bestDy) {
+					bestDy = abs;
+					bestSnapY = oy;
+					hasSnapY = true;
+				}
+			}
+		}
+
+		// 画板坐标的 X 坐标（吸附目标）= bestSnapX
+		// 当前 X = mx，需要调整 = bestSnapX - mx = bestDx
+		// 实际要写回 bounds 的是 moving 的 X：moving.getX() + bestDx
+
+		// 决定是否吸附（注意：myXs[0] 就是当前 mb.getX()，所以 dx = bestSnapX - mb.getX()）
+		if (hasSnapX && bestDx <= SNAP_THRESHOLD) {
+			mb.setRect(bestSnapX, mb.getY(), mb.getWidth(), mb.getHeight());
+		}
+		if (hasSnapY && bestDy <= SNAP_THRESHOLD) {
+			mb.setRect(mb.getX(), bestSnapY, mb.getWidth(), mb.getHeight());
+		}
+
+		// 重新计算 bestDx/bestDy（吸附后可能更近或等于 0）；但我们要的是吸附"前"的对齐线，
+		// 否则看不出对齐关系，所以用吸附前的距离：
+		// 简化：先记录吸附前的距离，再吸附
+		// 上面的代码已经做了吸附，这里辅助线用吸附位置（bestSnap）即可
+
+		// 对齐辅助线（在 ALIGN_THRESHOLD 内显示）
+		// 画辅助线时需要先取吸附后位置对应的 X / Y：
+		if (hasSnapX && bestDx <= ALIGN_THRESHOLD) {
+			// 屏幕坐标 = 画板坐标 * zoom + transform.tx
+			double screenX = bestSnapX * zoomFactor + transform.getTranslateX();
+			Rectangle bounds = getBounds();
+			activeSnapGuideV = new Line2D.Double(screenX, 0, screenX, bounds.height);
+		} else {
+			activeSnapGuideV = null;
+		}
+		if (hasSnapY && bestDy <= ALIGN_THRESHOLD) {
+			double screenY = bestSnapY * zoomFactor + transform.getTranslateY();
+			Rectangle bounds = getBounds();
+			activeSnapGuideH = new Line2D.Double(0, screenY, bounds.width, screenY);
+		} else {
+			activeSnapGuideH = null;
+		}
+	}
+
+	/**
+	 * 绘制对齐辅助线（在屏幕坐标系下，覆盖在最上层）
+	 */
+	private void drawSnapGuides(Graphics g) {
+		if (activeSnapGuideV == null && activeSnapGuideH == null) {
+			return;
+		}
+		Graphics2D g2 = (Graphics2D) g.create();
+		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		boolean dark = isDarkTheme();
+		Color c = dark ? ALIGN_GUIDE_COLOR_DARK : ALIGN_GUIDE_COLOR_LIGHT;
+		g2.setColor(c);
+		g2.setStroke(new BasicStroke(1.0f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+				10f, new float[]{4f, 4f}, 0f));
+		if (activeSnapGuideV != null) {
+			g2.draw(activeSnapGuideV);
+		}
+		if (activeSnapGuideH != null) {
+			g2.draw(activeSnapGuideH);
+		}
+		g2.dispose();
+	}
+
+	// ====================== 持久化：列连接键 ======================
+
+	/**
+	 * 将 KanbanCard 实例关联回"激活高亮"集合（已不需要；保留 placeholder）
+	 */
+	@SuppressWarnings("unused")
+	private void ensureRelatedRowKeysResolved() {
+		// 保留：未来若引入卡片删除时可能需要清理 relatedRowKeys
+		// 当前实现下，refreshRelatedRows 每次重绘前都会重建，无需特殊处理
 	}
 }

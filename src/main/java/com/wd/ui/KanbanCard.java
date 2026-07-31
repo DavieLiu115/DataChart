@@ -212,6 +212,33 @@ public class KanbanCard {
 	}
 
 	/**
+	 * 临时高亮行（用于"激活列"传递颜色给 Connection 端点使用）
+	 *
+	 * <p>每次重绘前由 {@code KanbanBoard} 调用，传入当前激活列对应的颜色（橙色等）。
+	 * 读 {@link #getHighlightedColorForRow(int)} 时会优先使用此临时色，覆盖连线占用色，
+	 * 让"激活列"统一显色。</p>
+	 */
+	private final java.util.Map<Integer, java.awt.Color> activeRowColors = new java.util.HashMap<>();
+
+	/**
+	 * 设置临时行高亮色
+	 */
+	public void setActiveRowColor(int row, java.awt.Color color) {
+		if (color == null) {
+			activeRowColors.remove(row);
+		} else {
+			activeRowColors.put(row, color);
+		}
+	}
+
+	/**
+	 * 清除所有临时行高亮色
+	 */
+	public void clearActiveRowColors() {
+		activeRowColors.clear();
+	}
+
+	/**
 	 * 获取用户手动选中的行集合
 	 */
 	public java.util.Set<Integer> getHighlightedRows() {
@@ -299,6 +326,104 @@ public class KanbanCard {
 		double rowCenterY = bounds.getY() + headerHeight + rowIndex * rowHeight + rowHeight / 2.0;
 		double leftX = bounds.getX();
 		return new java.awt.geom.Point2D.Double(leftX, rowCenterY);
+	}
+
+	/**
+	 * 表头内"表名"区域的右边界 x 坐标（用于 hit test 区分 header 左右半部分）
+	 *
+	 * <p>返回的 x 为表名文本的右端位置 + 一个小间距。表名/表注释 hit test 用此判断
+	 * 当前点击是表名（左半）还是注释（右半）。</p>
+	 */
+	public double getHeaderNameRightX() {
+		return bounds.getX() + padding + 18 // 图标宽 16 + 间距 2
+				+ getHeaderFontMetricsCache().stringWidth(
+						tableInfo == null ? name : tableInfo.getName());
+	}
+
+	/**
+	 * 列行内"列名 + 冒号 + 类型"区域的右边界 x 坐标
+	 *
+	 * <p>用于 hit test 区分列行左半（列名/类型）和右半（注释）：</p>
+	 * <ul>
+	 *   <li>左半（< 返回值）→ 弹复制列名/注释菜单</li>
+	 *   <li>右半（≥ 返回值）→ 走连线模式</li>
+	 * </ul>
+	 */
+	public double getColumnNameRightX(int rowIndex) {
+		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
+			return -1;
+		}
+		com.wd.db.ColumnInfo col = tableInfo.getColumns().get(rowIndex);
+		java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+				1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = img.createGraphics();
+		FontMetrics colFm = g.getFontMetrics(columnFont);
+		g.dispose();
+		// 列文本起点 = bounds.getX() + padding + 20 (图标 16 + 间距 4)
+		double textStartX = bounds.getX() + padding + 20;
+		String nameAndSep = col.getName() + " : " + col.getType();
+		return textStartX + colFm.stringWidth(nameAndSep);
+	}
+
+	/**
+	 * 获取列行（field row）在画板坐标的 y 范围 (top, bottom)
+	 */
+	public double getRowTop(int rowIndex) {
+		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
+			return -1;
+		}
+		return bounds.getY() + headerHeight + rowIndex * 18;
+	}
+
+	/**
+	 * 返回该行当前的"高亮背景色"（如果有的话）。
+	 *
+	 * <p>优先级（与 {@code drawTableCard} 中行高亮一致）：</p>
+	 * <ol>
+	 *   <li>用户手动选中（橙色 #FE9933）</li>
+	 *   <li>关联列高亮（橙色 #FD9933，由 {@code KanbanBoard.refreshRelatedRows} 写入）</li>
+	 *   <li>连线占用（连线的 palette 颜色）</li>
+	 * </ol>
+	 *
+	 * <p>供 {@code Connection} 用来决定线色（需求 1：起点有背景色时整条线统一为该色）。</p>
+	 *
+	 * @param rowIndex 行索引
+	 * @return 当前生效的高亮色；无高亮返回 null
+	 */
+	public java.awt.Color getHighlightedColorForRow(int rowIndex) {
+		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
+			return null;
+		}
+		if (highlightedRows.contains(rowIndex)) {
+			return USER_HIGHLIGHT_COLOR;
+		}
+		// 临时激活色（关联列 → 橙色）
+		java.awt.Color active = activeRowColors.get(rowIndex);
+		if (active != null) {
+			return active;
+		}
+		java.awt.Color c = connectionHighlightRows.get(rowIndex);
+		if (c != null) {
+			return c;
+		}
+		return null;
+	}
+
+	/**
+	 * header 字体度量（懒加载，避免重复构造 FontMetrics）
+	 */
+	private FontMetrics headerFontMetricsCache;
+
+	private FontMetrics getHeaderFontMetricsCache() {
+		if (headerFontMetricsCache == null) {
+			// 这里的 FontMetrics 仅用于估算宽度，使用默认 font
+			java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+					1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+			Graphics2D g = img.createGraphics();
+			headerFontMetricsCache = g.getFontMetrics(headerFont);
+			g.dispose();
+		}
+		return headerFontMetricsCache;
 	}
 
 	/**

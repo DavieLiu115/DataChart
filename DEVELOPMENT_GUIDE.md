@@ -96,3 +96,61 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - `ChartRelation`：表连接（from/to 卡片 ID + 字段 + relationType）
 - `RelationType`：ONE_TO_ONE/ONE_TO_MANY/MANY_TO_ONE/MANY_TO_MANY/UNKNOWN
 - 计划用 fastjson（已在依赖中）序列化/反序列化
+
+### 14. ER 图交互规范（ER-style interaction）
+
+#### 连线绘制
+- 默认线宽 `Connection.DEFAULT_STROKE_WIDTH = 2.4f`（从 1.6 加粗，便于辨识）
+- 选中连线时 `KanbanBoard.paintComponent` 临时把 `strokeWidth` 改成 2.5f 强调
+- 端点形状由 `RelationType` 决定：
+  - `ONE_TO_ONE` 两端单竖线（"1" 标识）
+  - `ONE_TO_MANY` 源端单竖线、目标端三叉（crow's foot）
+  - `MANY_TO_ONE` 反之
+  - `MANY_TO_MANY` 两端都三叉
+  - `UNKNOWN` 不画端点形状，保持简洁
+- 形状大小随线宽缩放（`Math.max(8.0, strokeWidth * 4.5)`），描边略细于线本身
+
+#### 起点背景色同步整条连线（需求 1）
+- `Connection.resolveLineColor()` 优先用 `source.getHighlightedColorForRow(sourceRow)`，没有再用 palette 颜色
+- 这样当起点行被高亮（用户选中 / 关联列 / 连线占用），整条线统一为该色
+
+#### 关联列高亮（需求 2）
+- `KanbanBoard.activeHighlightCard / activeHighlightRow`：当前用户左键选中的列
+- `KanbanBoard.refreshRelatedRows()` 在每次重绘前重新计算 `relatedRowKeys`（cardId#row 形式）
+- 关联列高亮色 `RELATED_ROW_COLOR = #FD9933`，与用户选中色 `#FE9933` 略区分
+- 切换到其他列时，`toggleRowSelection` 会清空旧选中 → 自动恢复
+
+#### 行高亮临时通道（让 Connection 拿到激活色）
+- `KanbanCard.activeRowColors`：每帧重绘前由 `KanbanBoard` 写入
+- `getHighlightedColorForRow()` 优先级：用户选中 > 临时激活色 > 连线占用色
+- 用途：让连线的 `source.getHighlightedColorForRow()` 能感知"激活列"颜色
+
+#### 复制到剪贴板（需求 3、4）
+- 使用 `java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()` + `StringSelection`
+- 不使用 IntelliJ 的 `CopyPasteManager`，因为本组件不依赖 IDE 编辑器上下文
+- 表头右键统一弹"复制表名 / 复制注释"两个菜单项（不再分左右半）
+- 列行右键分左右半：
+  - 左半（列名+类型，hit test 用 `KanbanCard.getColumnNameRightX()`）→ 弹"复制列名/复制注释"菜单
+  - 右半（注释区域）→ 走连线模式
+- **菜单 hover 颜色修复**：Swing L&F 在 IntelliJ 主题下默认是白字 hover → 看不见
+  - 解决：所有菜单项 `setForeground(JBColor.foreground())` + `putClientProperty("MenuItem.selectionForeground", JBColor.foreground())`
+  - 参考 `KanbanBoard.buildStyledPopupMenu()` / `buildStyledMenuItem()`
+
+#### 拖拽磁吸 + 对齐辅助线（需求 6）
+- 阈值常量 `SNAP_THRESHOLD = 8px` / `ALIGN_THRESHOLD = 10px`（画板坐标）
+- 候选对齐点：其它卡片的左/中/右（X 轴）、上/中/下（Y 轴）
+- 距离 < SNAP 时直接吸附；< ALIGN 时显示虚线辅助线（`ALIGN_GUIDE_COLOR_LIGHT/DARK`）
+- 辅助线在 `paintComponent` 末尾绘制，独立于 `transform`，覆盖在所有元素之上
+- 屏幕坐标转换：`screenX = bestSnapX * zoomFactor + transform.getTranslateX()`
+
+#### 连线右键菜单（需求 7）
+- 子菜单 "关系类型"：一对一 / 一对多 / 多对一 / 多对多，使用 `JCheckBoxMenuItem` 标记当前选中
+- 选中后 `Connection.setRelationType()` → `repaint()`
+- 关系类型通过 `ChartRelation.relationType` 持久化到 JSON
+
+### 15. 主题适配
+- 所有新增颜色都按 `isDarkTheme()` 区分深色 / 浅色变体：
+  - `ALIGN_GUIDE_COLOR_LIGHT = #FE9933`（浅色）
+  - `ALIGN_GUIDE_COLOR_DARK = #FFB266`（深色）
+- 关联列高亮 `RELATED_ROW_COLOR = #FD9933` 在两套主题下都能看清，不需要切换
+- 复制菜单的 `setEnabled` 处理空注释情况，避免用户点了无效果
