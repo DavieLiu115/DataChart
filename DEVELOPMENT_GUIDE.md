@@ -133,8 +133,9 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - 左半（列名+类型，hit test 用 `KanbanCard.getColumnNameRightX()`）→ 弹"复制列名/复制注释"菜单
   - 右半（注释区域）→ 走连线模式
 - **菜单 hover 颜色修复**：Swing L&F 在 IntelliJ 主题下默认是白字 hover → 看不见
-  - 解决：所有菜单项 `setForeground(JBColor.foreground())` + `putClientProperty("MenuItem.selectionForeground", JBColor.foreground())`
-  - 参考 `KanbanBoard.buildStyledPopupMenu()` / `buildStyledMenuItem()`
+  - 解决：所有菜单项 `putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND)` 固定为蓝色 `#2470B0`（与列类型文字色一致）
+  - 背景保持 `JBColor.background()`，两种主题下 hover 都清晰
+  - 参考 `KanbanBoard.buildStyledPopupMenu()` / `buildStyledMenuItem()` / 常量 `MENU_HOVER_FOREGROUND`
 
 #### 拖拽磁吸 + 对齐辅助线（需求 6）
 - 阈值常量 `SNAP_THRESHOLD = 8px` / `ALIGN_THRESHOLD = 10px`（画板坐标）
