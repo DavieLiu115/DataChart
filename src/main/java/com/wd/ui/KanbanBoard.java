@@ -72,6 +72,9 @@ public class KanbanBoard extends JPanel {
 	/** 连线列表 */
 	private final List<Connection> connections = new ArrayList<>();
 
+	/** 当前选中的连线 */
+	private Connection selectedConnection = null;
+
 	/** 连线模式：源卡片和源行 */
 	private KanbanCard connectionSource = null;
 	private int connectionSourceRow = -2;
@@ -185,6 +188,25 @@ public class KanbanBoard extends JPanel {
 			public void mousePressed(MouseEvent e) {
 				lastPoint = e.getPoint();
 				requestFocusInWindow();
+
+				// 检查是否命中连线
+				Connection hitConn = hitTestConnection(e.getPoint());
+				if (hitConn != null) {
+					selectedConnection = hitConn;
+					if (e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3) {
+						// 右键：弹出删除菜单
+						showConnectionContextMenu(hitConn, e.getPoint());
+					} else {
+						// 左键：选中（重绘加粗）
+						repaint();
+					}
+					return;
+				}
+				// 点击其他区域：取消选中连线
+				if (selectedConnection != null) {
+					selectedConnection = null;
+					repaint();
+				}
 
 				KanbanCard card = findCardAt(e.getPoint());
 				if (card != null) {
@@ -704,7 +726,15 @@ public class KanbanBoard extends JPanel {
 
 		// 2. 绘制所有连线（在卡片下方）
 		for (Connection conn : connections) {
-			conn.draw(g2d);
+			// 选中连线加粗
+			if (conn == selectedConnection) {
+				float oldWidth = conn.getStrokeWidth();
+				conn.setStrokeWidth(2.5f);
+				conn.draw(g2d);
+				conn.setStrokeWidth(oldWidth);
+			} else {
+				conn.draw(g2d);
+			}
 		}
 
 		// 3. 绘制所有卡片
@@ -888,6 +918,89 @@ public class KanbanBoard extends JPanel {
 		repaint();
 		notifyBoardChanged();
 		return conn;
+	}
+
+	/**
+	 * 删除连线（同时清除两端高亮）
+	 */
+	public void removeConnection(Connection conn) {
+		if (conn == null) {
+			return;
+		}
+		connections.remove(conn);
+		// 清除两端行高亮（仅当是连线的颜色时）
+		clearRowHighlightIf(conn.getSource(), conn.getSourceRow(), conn.getColor());
+		clearRowHighlightIf(conn.getTarget(), conn.getTargetRow(), conn.getColor());
+		if (selectedConnection == conn) {
+			selectedConnection = null;
+		}
+		repaint();
+		notifyBoardChanged();
+	}
+
+	/**
+	 * 清除指定行的高亮（仅当颜色匹配时）
+	 */
+	private void clearRowHighlightIf(KanbanCard card, int rowIndex, Color color) {
+		if (card == null) {
+			return;
+		}
+		if (color != null && color.equals(card.getRowHighlightColor())) {
+			card.setRowHighlightColor(null);
+			card.setSelectedRowIndex(-2);
+		}
+	}
+
+	/**
+	 * 检测鼠标位置是否命中某条连线（简单矩形近似：源行右 → 目标行左之间的中线矩形）
+	 *
+	 * @return 命中的连线，未命中返回 null
+	 */
+	private Connection hitTestConnection(java.awt.Point screenPoint) {
+		Point2D boardPoint = transformPoint(screenPoint);
+		for (int i = connections.size() - 1; i >= 0; i--) {
+			Connection conn = connections.get(i);
+			Point2D from = conn.getSource().getRowRight(conn.getSourceRow());
+			Point2D to = conn.getTarget().getRowLeft(conn.getTargetRow());
+			if (from == null || to == null) {
+				continue;
+			}
+			double minX = Math.min(from.getX(), to.getX());
+			double maxX = Math.max(from.getX(), to.getX());
+			double minY = Math.min(from.getY(), to.getY());
+			double maxY = Math.max(from.getY(), to.getY());
+			// 上下扩展 8 像素，点击灵敏度
+			if (boardPoint.getX() >= minX - 4 && boardPoint.getX() <= maxX + 4
+					&& boardPoint.getY() >= minY - 8 && boardPoint.getY() <= maxY + 8) {
+				return conn;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * 在指定屏幕坐标处弹出连线右键菜单（删除）
+	 */
+	private void showConnectionContextMenu(Connection conn, java.awt.Point screenPoint) {
+		if (conn == null) {
+			return;
+		}
+		selectedConnection = conn;
+		repaint();
+		javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+		javax.swing.JMenuItem deleteItem = new javax.swing.JMenuItem("删除连线");
+		deleteItem.addActionListener(e -> {
+			removeConnection(conn);
+		});
+		menu.add(deleteItem);
+		menu.show(this, screenPoint.x, screenPoint.y);
+	}
+
+	/**
+	 * 获取当前选中的连线
+	 */
+	public Connection getSelectedConnection() {
+		return selectedConnection;
 	}
 
 	/**
