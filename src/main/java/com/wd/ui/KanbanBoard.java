@@ -3,12 +3,14 @@ package com.wd.ui;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
+import com.wd.db.TableDropHandler;
 import com.wd.db.TableInfo;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.KeyAdapter;
@@ -82,11 +84,26 @@ public class KanbanBoard extends JPanel {
 
 	private final Project project;
 
+	/** 拖拽目标处理器（接收 Database 表拖放） */
+	private TableDropHandler dropHandler;
+
 	public KanbanBoard(Project project) {
 		this.project = project;
 		setBackground(backgroundColor);
 		setFocusable(true);
 		initComponents();
+		initDropTarget();
+	}
+
+	/**
+	 * 注册拖拽目标：接收来自 Database 工具窗口的表格拖放
+	 */
+	private void initDropTarget() {
+		dropHandler = new TableDropHandler(project, (info, dropPoint) -> {
+			// 收到表元信息后在看板绘制表卡片
+			addTableCard(info, dropPoint);
+		});
+		dropHandler.registerTo(this);
 	}
 
 	/**
@@ -469,6 +486,18 @@ public class KanbanBoard extends JPanel {
 	 * @param info 表元信息（来自 {@code TableMetadataService}）
 	 */
 	public void addTableCard(TableInfo info) {
+		addTableCard(info, null);
+	}
+
+	/**
+	 * 添加一个数据库表卡片，可指定位置（拖放点）
+	 *
+	 * <p>如果指定了位置，卡片出现在该位置；否则自动平铺布局。</p>
+	 *
+	 * @param info      表元信息
+	 * @param dropPoint 拖放位置（画板坐标），可为 null
+	 */
+	public void addTableCard(TableInfo info, Point dropPoint) {
 		if (info == null) {
 			return;
 		}
@@ -478,9 +507,27 @@ public class KanbanBoard extends JPanel {
 		// 限制最大高度（避免单卡过高）
 		height = Math.min(height, 400);
 
+		double x;
+		double y;
+		if (dropPoint != null) {
+			// 拖放点转换为画板坐标
+			Point2D boardPoint = transformPoint(dropPoint);
+			// 让卡片中心对准拖放点
+			x = boardPoint.getX() - TABLE_CARD_WIDTH / 2;
+			y = boardPoint.getY() - height / 2;
+		} else {
+			x = 0;
+			y = 0;
+		}
+
 		KanbanCard card = KanbanCard.forTable(info.getId(), info,
-				0, 0, TABLE_CARD_WIDTH, height);
-		addCard(card);
+				x, y, TABLE_CARD_WIDTH, height);
+		if (dropPoint != null) {
+			cards.add(card); // 直接添加到指定位置，不自动平铺
+			repaint();
+		} else {
+			addCard(card);
+		}
 	}
 
 	/**

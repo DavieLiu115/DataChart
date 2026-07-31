@@ -134,29 +134,22 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			if (dasColumns != null) {
 				for (Object col : dasColumns) {
 					String colName = invokeStringNoArgs(col, "getName");
-					String colType = invokeStringNoArgs(col, "getDataType");
-					if (colType == null) {
-						colType = "";
-					} else {
-						// 去掉包裹的引号
-						colType = colType.replace("`", "").replace("\"", "");
-					}
+
+					// 字段类型：getDataType() 返回 DataType 对象，用 getSpecification() 获取类型名
+					String colType = resolveColumnType(col);
+
 					String colComment = invokeStringNoArgs(col, "getComment");
-					Boolean isPrimary = invokeBooleanNoArgs(col, "isPrimary");
-					if (isPrimary == null) {
-						isPrimary = invokeBooleanNoArgs(col, "isPrimaryKey");
-					}
-					Boolean isNullable = invokeBooleanNoArgs(col, "isNotNull");
-					// DasColumn.isNotNull 表示"非空"，需取反
-					if (isNullable != null) {
-						isNullable = !isNullable;
-					} else {
-						isNullable = true;
-					}
-					Boolean isIndex = invokeBooleanNoArgs(col, "isIndex");
-					boolean isIndexed = isIndex != null && isIndex;
+
+					// 主键 / 索引：通过 DasTable.getColumnAttrs(DasColumn) 获取属性集合判断
+					boolean isPrimary = hasColumnAttribute(table, col, "PRIMARY_KEY");
+					boolean isIndexed = hasColumnAttribute(table, col, "INDEX");
+
+					// 可空性：DasColumn.isNotNull() 表示"非空"，取反即为可空
+					Boolean isNotNull = invokeBooleanNoArgs(col, "isNotNull");
+					boolean isNullable = isNotNull == null || !isNotNull;
+
 					columns.add(new ColumnInfo(colName, colType, colComment,
-							isPrimary != null && isPrimary, isNullable, isIndexed));
+							isPrimary, isNullable, isIndexed));
 				}
 			}
 			return new TableInfo(id, tableName, schema, datasourceName, comment, columns);
@@ -167,6 +160,102 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	}
 
 	// ========== 反射工具方法 ==========
+
+	/**
+	 * 解析列的数据类型
+	 *
+	 * <p>DasColumn.getDataType() 返回 {@code DataType} 对象（不是 String），
+	 * 优先尝试 getSpecification() 获取类型名，失败则 toString()。</p>
+	 */
+	private static String resolveColumnType(Object column) {
+		try {
+			Object dataType = invokeNoArgs(column, "getDataType");
+			if (dataType == null) {
+				return "";
+			}
+			// 优先用 getSpecification()
+			Object spec = invokeNoArgs(dataType, "getSpecification");
+			if (spec != null && !spec.toString().isEmpty()) {
+				return cleanType(spec.toString());
+			}
+			return cleanType(dataType.toString());
+		} catch (Exception e) {
+			LOG.warn("resolveColumnType failed", e);
+			return "";
+		}
+	}
+
+	/** 清洗类型字符串：去掉包裹的反引号 / 双引号 / 多余空白 */
+	private static String cleanType(String type) {
+		return type.replace("`", "").replace("\"", "").trim();
+	}
+
+	/**
+	 * 判断某列是否具备指定属性（主键/索引等）
+	 *
+	 * <p>通过 {@code DasTable.getColumnAttrs(DasColumn)} 返回的 {@code Set<Attribute>}
+	 * 判断，属性枚举值有 PRIMARY_KEY / INDEX / FOREIGN_KEY 等。</p>
+	 *
+	 * @param table        DasTable 对象
+	 * @param column       DasColumn 对象
+	 * @param attributeEnum 属性枚举名（如 "PRIMARY_KEY" / "INDEX"）
+	 */
+	private static boolean hasColumnAttribute(Object table, Object column, String attributeEnum) {
+		try {
+			Object attrs = invokeWithArg(table, "getColumnAttrs", column);
+			if (attrs instanceof Collection) {
+				for (Object attr : (Collection<?>) attrs) {
+					if (attr != null && attributeEnum.equals(attr.toString())) {
+						return true;
+					}
+				}
+			}
+		} catch (Exception e) {
+			LOG.warn("hasColumnAttribute failed for " + attributeEnum, e);
+		}
+		return false;
+	}
+
+	/** 调用带一个 Object 参数的方法（按方法名匹配，兼容参数类型差异） */
+	private static Object invokeWithArg(Object target, String method, Object arg) {
+		try {
+			Method m = findMethodByName(target.getClass(), method);
+			if (m == null) {
+				return null;
+			}
+			m.setAccessible(true);
+			return m.invoke(target, arg);
+		} catch (Exception e) {
+			LOG.warn("invokeWithArg failed: " + target.getClass().getSimpleName() + "." + method, e);
+			return null;
+		}
+	}
+
+	/** 按方法名查找方法（含父类/接口遍历，不校验参数类型） */
+	private static Method findMethodByName(Class<?> clazz, String method) {
+		try {
+			for (Method m : clazz.getMethods()) {
+				if (m.getName().equals(method)) {
+					return m;
+				}
+			}
+		} catch (Exception ignored) {
+		}
+		// 遍历父类接口
+		Class<?> sup = clazz.getSuperclass();
+		while (sup != null && sup != Object.class) {
+			try {
+				for (Method m : sup.getMethods()) {
+					if (m.getName().equals(method)) {
+						return m;
+					}
+				}
+			} catch (Exception ignored) {
+			}
+			sup = sup.getSuperclass();
+		}
+		return null;
+	}
 
 	private static boolean isDatabasePluginEnabled() {
 		try {

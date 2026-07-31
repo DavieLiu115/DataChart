@@ -1,7 +1,9 @@
 package com.wd.ui;
 
+import com.intellij.ui.JBColor;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableInfo;
+import com.wd.icon.PluginIcons;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
@@ -11,6 +13,7 @@ import java.awt.Image;
 import java.awt.geom.Rectangle2D;
 import java.util.List;
 import javax.swing.ImageIcon;
+import javax.swing.Icon;
 
 /**
  * 看板中的卡片元素，支持两种渲染模式：
@@ -51,7 +54,10 @@ public class KanbanCard {
 	private Font headerFont = new Font(Font.SANS_SERIF, Font.BOLD, 13);
 	private Font bodyFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
 	private Font columnFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
-	private Font commentFont = new Font(Font.SANS_SERIF, Font.ITALIC, 10);
+	/** Header 注释斜体字体 */
+	private Font italicHeaderFont = new Font(Font.SANS_SERIF, Font.ITALIC, 11);
+	/** 列注释斜体字体 */
+	private Font italicCommentFont = new Font(Font.SANS_SERIF, Font.ITALIC, 10);
 
 	// 按 type 区分的配色（亮色 / 深色各一套，适配主题）
 	private static final Color HEADER_LINE = new Color(0x4A90E2);
@@ -67,7 +73,6 @@ public class KanbanCard {
 	private static final Color TEXT_DARK = new Color(0x333333);
 	private static final Color TEXT_LIGHT = new Color(0xDDDDDD);
 	private static final Color COMMENT_COLOR = new Color(0x888888);
-	private static final Color PRIMARY_COLOR = new Color(0xE8B548);
 
 	/**
 	 * 构造方法（图表模式）
@@ -314,95 +319,105 @@ public class KanbanCard {
 				(int) bounds.getHeight(),
 				8, 8);
 
-		// Header 文字 - 表名（带 PK 图标风格）
+		// Header：表图标 + 表名 + 斜体注释（参考 BoardElement 风格）
+		int headerTextX = (int) bounds.getX() + padding;
+		// 表图标
+		Icon tableIcon = isDark ? PluginIcons.dataSchema_dark : PluginIcons.dataSchema;
+		if (tableIcon != null) {
+			int iconY = (int) (bounds.getY() + (headerHeight - 16) / 2);
+			tableIcon.paintIcon(null, g2d, headerTextX, iconY);
+			headerTextX += 18;
+		}
+
 		g2d.setColor(Color.WHITE);
 		g2d.setFont(headerFont);
 		FontMetrics headerFm = g2d.getFontMetrics();
 		String tableName = tableInfo.getName();
-		String tableComment = tableInfo.getComment();
-		String headerText = tableName;
-		if (tableComment != null && !tableComment.isEmpty()) {
-			headerText = tableName + "  /  * " + tableComment + " *";
-		}
-		int headerTextX = (int) bounds.getX() + padding;
 		int headerTextY = (int) bounds.getY() + (headerHeight + headerFm.getAscent() - headerFm.getDescent()) / 2;
-		g2d.drawString(headerText, headerTextX, headerTextY);
+		g2d.drawString(tableName, headerTextX, headerTextY);
 
-		// Header 右侧显示 schema 标识（小字）
-		if (tableInfo.getSchema() != null && !tableInfo.getSchema().isEmpty()) {
-			String schema = "[" + tableInfo.getSchema() + "]";
-			int schemaW = headerFm.stringWidth(schema);
-			g2d.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+		// 表注释（斜体，灰白色）
+		String tableComment = tableInfo.getComment();
+		if (tableComment != null && !tableComment.isEmpty()) {
+			int commentX = headerTextX + headerFm.stringWidth(tableName) + 6;
+			int maxCommentW = (int) (bounds.getX() + bounds.getWidth() - padding - commentX);
+			g2d.setFont(italicHeaderFont);
 			g2d.setColor(new Color(255, 255, 255, 200));
-			g2d.drawString(schema,
-					(int) (bounds.getX() + bounds.getWidth() - padding - schemaW),
-					(int) (bounds.getY() + headerHeight - 6));
+			String commentText = "/* " + tableComment + " */";
+			g2d.drawString(truncateByWidth(commentText, maxCommentW, g2d.getFontMetrics()),
+					commentX, headerTextY);
 			g2d.setFont(headerFont);
 		}
 
 		// Body：列定义列表
 		List<ColumnInfo> columns = tableInfo.getColumns();
-		int bodyY = (int) bounds.getY() + headerHeight + padding;
+		double bodyTop = bounds.getY() + headerHeight;
 		int leftX = (int) bounds.getX() + padding;
-		int maxBodyY = (int) (bounds.getY() + bounds.getHeight() - padding);
+		double maxBodyY = bounds.getY() + bounds.getHeight() - padding;
 
-		// 列定义区底色（极淡分隔）
-		g2d.setColor(separatorColor);
-		g2d.drawLine(leftX - 2, bodyY - 4,
-				(int) (bounds.getX() + bounds.getWidth()) - padding, bodyY - 4);
+		// 计算行高（图标 14px + 留白）
+		int rowHeight = 20;
 
 		g2d.setFont(columnFont);
 		FontMetrics colFm = g2d.getFontMetrics();
 
-		int maxRows = (maxBodyY - bodyY) / 18;
+		int maxRows = (int) ((maxBodyY - bodyTop) / rowHeight);
 		int rowCount = Math.min(columns.size(), maxRows);
 
 		for (int i = 0; i < rowCount; i++) {
 			ColumnInfo col = columns.get(i);
-			int rowY = bodyY + colFm.getAscent();
+			double rowTop = bodyTop + i * rowHeight;
+			double rowCenterY = rowTop + rowHeight / 2;
+			int textY = (int) (rowCenterY + colFm.getAscent() / 2 - 2);
 
-			// 1. 主键图标（金色小方块）
+			// 行分隔线（参考 BoardElement：列之间画分隔线）
+			g2d.setColor(separatorColor);
+			g2d.drawLine((int) bounds.getX(), (int) rowTop,
+					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
+
+			// 1. 字段图标（主键金钥匙 / 索引导 / 普通点）
+			int iconX = leftX;
+			int iconY = (int) (rowCenterY - 7);
 			if (col.isPrimaryKey()) {
-				g2d.setColor(PRIMARY_COLOR);
-				g2d.fillRect(leftX, rowY - 9, 5, 11);
+				Icon pkIcon = isDark ? PluginIcons.colGoldKeyDotIndex_dark : PluginIcons.colGoldKeyDotIndex;
+				pkIcon.paintIcon(null, g2d, iconX, iconY);
 			} else if (col.isIndexed()) {
-				// 索引图标（灰色小圆点）
-				g2d.setColor(isDark ? new Color(0x999999) : new Color(0xBBBBBB));
-				g2d.fillOval(leftX, rowY - 7, 6, 6);
+				Icon idxIcon = isDark ? PluginIcons.colDotIndex_dark : PluginIcons.colDotIndex;
+				idxIcon.paintIcon(null, g2d, iconX, iconY);
+			} else {
+				Icon dotIcon = isDark ? PluginIcons.colDot_dark : PluginIcons.colDot;
+				dotIcon.paintIcon(null, g2d, iconX, iconY);
 			}
+			int colTextX = iconX + 16;
 
-			// 2. 列名
+			// 2. 列名 : 类型（参考 BoardElement 格式）
 			g2d.setColor(textColor);
-			String colName = col.getName();
-			g2d.drawString(colName, leftX + 12, rowY);
+			String columnText = col.getName() + " : " + col.getType();
+			g2d.drawString(columnText, colTextX, textY);
 
-			// 3. 类型
-			String type = col.getType();
-			int typeX = leftX + 130;
-			g2d.setColor(commentColor);
-			g2d.drawString(type, typeX, rowY);
-
-			// 4. 注释（超出宽度截断）
+			// 3. 注释（斜体）
 			String comment = col.getComment();
 			if (comment != null && !comment.isEmpty()) {
-				g2d.setFont(commentFont);
-				FontMetrics cmtFm = g2d.getFontMetrics();
-				int cmtX = typeX + 80;
+				int cmtX = colTextX + colFm.stringWidth(columnText) + 5;
 				int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
-				String truncated = truncateByWidth(comment, maxCmtW, cmtFm);
-				g2d.drawString(truncated, cmtX, rowY);
-				g2d.setFont(columnFont);
+				if (maxCmtW > 10) {
+					g2d.setFont(italicCommentFont);
+					g2d.setColor(commentColor);
+					String commentText = "/* " + comment + " */";
+					g2d.drawString(truncateByWidth(commentText, maxCmtW, g2d.getFontMetrics()),
+							cmtX, textY);
+					g2d.setFont(columnFont);
+					g2d.setColor(textColor);
+				}
 			}
-
-			bodyY += 18;
 		}
 
 		// 列数过多提示
 		if (columns.size() > rowCount) {
 			g2d.setColor(commentColor);
-			g2d.setFont(new Font(Font.SANS_SERIF, Font.ITALIC, 10));
+			g2d.setFont(italicCommentFont);
 			g2d.drawString("... 共 " + columns.size() + " 列",
-					leftX, maxBodyY - 4);
+					leftX, (int) maxBodyY);
 		}
 	}
 

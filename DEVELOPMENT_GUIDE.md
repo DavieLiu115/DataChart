@@ -75,3 +75,24 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - 图表模式：title + type + description
 - 表格模式（`KanbanCard.forTable(...)`）：header 显示"表名 / * 注释 *"，右上角显示 schema；body 显示列定义（PK 金色方块、索引灰色圆点、列名、类型、注释）
 - 通过 `tableInfo != null` 判断当前模式（`isTableMode()`）
+
+### 12. Database 拖拽接入（IntelliJ 自定义 DnD）
+- Database 工具窗口拖拽用的是 **IntelliJ 自定义 DnD**（`com.intellij.ide.dnd`，平台核心模块，可直接编译期引用），**不是** Swing DnD（TransferHandler/Transferable）
+- 关键接口：
+  - `DnDManager.getInstance().registerTarget(DnDTarget, JComponent)` 注册目标
+  - `DnDTarget`：`update(DnDEvent)` + `drop(DnDEvent)` + `cleanUpOnLeave()`
+  - `DnDEvent.getAttachedObject()` 获取拖拽对象
+- 拖拽对象判定：Database 表是 `DbTable`（实现 `DbElement`/`DbNamedElement`），用 `instanceof` 反射判断
+- **纯反射访问 Database**（`DbElement`/`DbNamedElement`），避免 ClassNotFoundException；`com.intellij.ide.dnd` 则直接编译期依赖
+- 反编译确认的 Database 元信息 API：
+  - 主键/索引：`DasTable.getColumnAttrs(DasColumn)` 返回 `Set<Attribute>`，用 `PRIMARY_KEY`/`INDEX` 枚举判断（**不要**用 `col.isPrimary()`，DasColumn 没有该方法）
+  - 类型：`getDataType()` 返回 `DataType` 对象，用 `getSpecification()` 取类型名，清洗反引号/引号
+  - 可空性：`isNotNull()` 是"非空"，取反
+  - 表/字段注释：`getComment()`
+
+### 13. .datachart JSON 图数据模型（com.wd.model）
+- `ChartData`：根模型（version + name + tables + relations），对应 .datachart JSON
+- `TableCardModel`：画布上的表卡片（id/datasource/schema/tableName/comment + 位置尺寸）
+- `ChartRelation`：表连接（from/to 卡片 ID + 字段 + relationType）
+- `RelationType`：ONE_TO_ONE/ONE_TO_MANY/MANY_TO_ONE/MANY_TO_MANY/UNKNOWN
+- 计划用 fastjson（已在依赖中）序列化/反序列化
