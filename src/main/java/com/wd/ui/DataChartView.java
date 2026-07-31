@@ -2,8 +2,11 @@ package com.wd.ui;
 
 import com.intellij.openapi.project.Project;
 import java.awt.BorderLayout;
+import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JTextField;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -13,6 +16,12 @@ import org.jetbrains.annotations.Nullable;
 public class DataChartView {
 
 	private JPanel rootPanel;
+	private JPanel headerTool;
+	private JButton exportPDFButton;
+	private JButton exportPictureButton;
+	private JTextField searchTextField;
+	private JButton fullScreamButton;
+	private JLabel zoomPercentLabel;
 	private Project project;
 
 	public DataChartView(@Nullable Project project) {
