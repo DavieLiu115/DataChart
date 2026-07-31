@@ -2,7 +2,7 @@
 <form xmlns="http://www.intellij.com/uidesigner/form/" version="1" bind-to-class="com.wd.ui.DataChartView">
   <grid id="27dc6" binding="rootPanel" layout-manager="GridBagLayout">
     <constraints>
-      <xy x="20" y="20" width="663" height="574"/>
+      <xy x="20" y="20" width="676" height="574"/>
     </constraints>
     <properties/>
     <border type="none"/>
@@ -90,7 +90,7 @@
           <gridbag weightx="1.0" weighty="1.0"/>
         </constraints>
         <properties>
-          <background color="-327681"/>
+          <background color="-526086"/>
         </properties>
         <border type="none"/>
         <children/>
