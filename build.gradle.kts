@@ -17,17 +17,18 @@ repositories {
 // Configure Gradle IntelliJ Plugin
 // Read more: https://plugins.jetbrains.com/docs/intellij/tools-gradle-intellij-plugin.html
 intellij {
-//    version.set("2023.2.6")
-//    type.set("IC") // Target IDE Platform
+//    version.set("2025.3")
+//    type.set("IU") // Target IDE Platform
     intellij.updateSinceUntilBuild = false
-    localPath.set("/Users/lww/Downloads/ideaJar/ideaIC-2022.3")
+    localPath.set("/Users/lww/Downloads/ideaJar/ideaIU-2025.3")
     plugins.set(
         listOf(
             /* Plugin Dependencies */
             "com.intellij.java",
             "org.jetbrains.kotlin",
-            /* Database 插件（Ultimate 版独有） */
-            "com.intellij.database",
+            /* 注意：不在这里添加 com.intellij.database。
+             * IC 版没有 Database 插件，且 DatabaseTableMetadataFetcher 使用纯反射访问，
+             * 编译期无需依赖；运行时由 plugin.xml 的可选依赖声明控制。 */
         )
     )
 
