@@ -23,8 +23,8 @@ public class DataChartView extends DialogWrapper {
 	private JTextField searchTextField;
 	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
-	private JPanel dataView;
 	private JButton searchButton;
+	private JPanel dataView;
 	private Project project;
 
 	public DataChartView(@Nullable Project project) {
