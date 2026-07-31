@@ -59,3 +59,19 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 
 ### 9. 扩展名统一管理
 所有文件扩展名统一用 `DataToolsFileType.EXTENSION = "datachart"` 常量，避免硬编码导致大小写不一致（曾导致 `getDefaultExtension()` 返回 `"dataChart"` 与注册的 `"datachart"` 不一致，使右键 New 菜单不显示文件类型）。
+
+### 10. Database 插件集成（可选依赖 + 反射）
+- Database 插件仅 Ultimate 版提供，集成时必须用 `<depends optional="true">com.intellij.database</depends>`
+- 反射访问关键类（避免 ClassNotFoundException）：
+  - `com.intellij.database.psi.DbPsiFacade` - 入口
+  - `com.intellij.database.psi.DbDataSource` - 数据源
+  - `com.intellij.database.util.DasUtil` - 工具方法（getTables/getColumns）
+  - `com.intellij.database.model.DasTable` / `DasColumn` - DAS 模型
+- 运行时检查：`PluginManagerCore.isPluginEnabled(PluginId.getId("com.intellij.database"))`
+- **API 语义注意**：`DasColumn.isNotNull()` 是"非空"，与 SQL `NOT NULL` 一致，但与 Java 语义相反，使用时要取反
+- 数据库类型字符串可能带反引号或双引号（`bigint` / `"varchar"`），需要清洗
+
+### 11. KanbanCard 双模式渲染
+- 图表模式：title + type + description
+- 表格模式（`KanbanCard.forTable(...)`）：header 显示"表名 / * 注释 *"，右上角显示 schema；body 显示列定义（PK 金色方块、索引灰色圆点、列名、类型、注释）
+- 通过 `tableInfo != null` 判断当前模式（`isTableMode()`）

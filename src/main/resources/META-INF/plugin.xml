@@ -22,6 +22,9 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
 
+    <!-- Database 插件是 Ultimate 版才有，声明为可选依赖，运行时动态检查 -->
+    <depends optional="true">com.intellij.database</depends>
+
     <!-- Extension points defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
@@ -33,5 +36,7 @@
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
 
         <internalFileTemplate name="DataChart"/>
+
+        <projectService serviceImplementation="com.wd.db.TableMetadataService"/>
     </extensions>
 </idea-plugin>

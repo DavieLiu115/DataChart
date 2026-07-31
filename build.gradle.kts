@@ -26,6 +26,8 @@ intellij {
             /* Plugin Dependencies */
             "com.intellij.java",
             "org.jetbrains.kotlin",
+            /* Database 插件（Ultimate 版独有） */
+            "com.intellij.database",
         )
     )
 

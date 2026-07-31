@@ -3,11 +3,10 @@ package com.wd.ui;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
-import java.awt.AlphaComposite;
+import com.wd.db.TableInfo;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -69,6 +68,11 @@ public class KanbanBoard extends JPanel {
 	private static final double DEFAULT_CARD_HEIGHT = 130;
 	private static final double CARD_HSPACE = 30;
 	private static final double CARD_VSPACE = 30;
+
+	/** 表格卡片尺寸（列多，需要更高） */
+	private static final double TABLE_CARD_WIDTH = 280;
+	private static final double TABLE_CARD_ROW_HEIGHT = 18;
+	private static final double TABLE_CARD_BASE_HEIGHT = 70;
 
 	/** 背景色（适配深色 / 浅色主题） */
 	private final Color backgroundColor = new JBColor(Gray._240, new Color(61, 63, 65));
@@ -458,18 +462,25 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 加载示例数据（用于演示）
+	 * 添加一个数据库表卡片（自动布局）
+	 *
+	 * <p>根据 TableInfo 的列数自动计算卡片高度，默认宽度 280px。</p>
+	 *
+	 * @param info 表元信息（来自 {@code TableMetadataService}）
 	 */
-	public void loadSampleData() {
-		clearCards();
-		addCard(new KanbanCard("1", "用户增长趋势", "line",
-				"展示过去 12 个月用户数量的变化趋势", 50, 50, DEFAULT_CARD_WIDTH, DEFAULT_CARD_HEIGHT));
-		addCard(new KanbanCard("2", "销售业绩对比", "bar",
-				"各地区季度销售额对比", 50, 50, DEFAULT_CARD_WIDTH, DEFAULT_CARD_HEIGHT));
-		addCard(new KanbanCard("3", "市场份额分布", "pie",
-				"不同产品在市场中的占有率", 50, 50, DEFAULT_CARD_WIDTH, DEFAULT_CARD_HEIGHT));
-		addCard(new KanbanCard("4", "用户活跃度", "scatter",
-				"用户年龄与活跃度的相关性", 50, 50, DEFAULT_CARD_WIDTH, DEFAULT_CARD_HEIGHT));
+	public void addTableCard(TableInfo info) {
+		if (info == null) {
+			return;
+		}
+		// 高度 = 顶部 header + 列数行 + 底部 padding
+		int rowCount = Math.max(3, info.getColumns().size()); // 最少显示 3 行高度
+		double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
+		// 限制最大高度（避免单卡过高）
+		height = Math.min(height, 400);
+
+		KanbanCard card = KanbanCard.forTable(info.getId(), info,
+				0, 0, TABLE_CARD_WIDTH, height);
+		addCard(card);
 	}
 
 	/**

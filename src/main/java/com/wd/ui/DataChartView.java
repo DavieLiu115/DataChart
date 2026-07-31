@@ -54,8 +54,7 @@ public class DataChartView extends DialogWrapper {
 		dataView.setLayout(new BorderLayout());
 		kanbanBoard = new KanbanBoard(project);
 		dataView.add(kanbanBoard, BorderLayout.CENTER);
-		// 加载示例卡片（后续可改为从 .datachart JSON 解析）
-		kanbanBoard.loadSampleData();
+		// 看板初始为空，等待用户从 Database 工具窗口拖入表
 	}
 
 	/**
