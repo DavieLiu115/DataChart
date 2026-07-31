@@ -11,6 +11,8 @@ import org.jetbrains.annotations.Nullable;
  */
 public class DataToolsFileType extends LanguageFileType {
 
+	public static final String EXTENSION = "datachart";
+
 	public static final DataToolsFileType INSTANCE_C = new DataToolsFileType();
 
 	private DataToolsFileType() {
@@ -26,19 +28,19 @@ public class DataToolsFileType extends LanguageFileType {
 	@NotNull
 	@Override
 	public String getDisplayName() {
-		return "DataChart 图形文件";
+		return "DataChart";
 	}
 
 	@NotNull
 	@Override
 	public String getDescription() {
-		return "DataChart 图形数据文件";
+		return "DataChart";
 	}
 
 	@NotNull
 	@Override
 	public String getDefaultExtension() {
-		return DataChart.LANGUAGE_NAME;
+		return EXTENSION;
 	}
 
 	@Nullable

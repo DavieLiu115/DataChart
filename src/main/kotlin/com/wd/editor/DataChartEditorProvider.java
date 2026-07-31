@@ -16,7 +16,7 @@ public class DataChartEditorProvider implements FileEditorProvider, DumbAware {
 	@Override
 	public boolean accept(@NotNull Project project, @NotNull VirtualFile file) {
 		// 根据文件扩展名判断是否接受该文件
-		return "datachart".equalsIgnoreCase(file.getExtension());
+		return DataToolsFileType.EXTENSION.equalsIgnoreCase(file.getExtension());
 	}
 
 	@Override

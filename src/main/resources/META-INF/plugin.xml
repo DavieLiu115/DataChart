@@ -32,6 +32,6 @@
 
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
 
-        <internalFileTemplate name="DataChart 图形文件"/>
+        <internalFileTemplate name="DataChart"/>
     </extensions>
 </idea-plugin>
