@@ -417,21 +417,26 @@ public class KanbanBoard extends JPanel {
 			 * </ul>
 			 */
 			private void toggleRowSelection(KanbanCard card, int rowIndex) {
-				int currentIndex = card.getSelectedRowIndex();
-				Color currentColor = card.getRowHighlightColor();
-				if (currentIndex == rowIndex && SELECTED_ROW_COLOR.equals(currentColor)) {
-					// 已是"用户选中"状态 → 取消
-					card.setSelectedRowIndex(-2);
-					card.setRowHighlightColor(null);
+				int userIdx = card.getUserSelectedRowIndex();
+				if (userIdx == rowIndex) {
+					// 已是"用户选中"状态 → 取消（只清 userSelectedRowIndex 和当前橙色）
+					card.setUserSelectedRowIndex(-2);
+					if (SELECTED_ROW_COLOR.equals(card.getRowHighlightColor())) {
+						card.setSelectedRowIndex(-2);
+						card.setRowHighlightColor(null);
+					}
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				} else {
-					// 切换为"用户选中"（先清除所有卡的"用户选中"状态）
+					// 切换为"用户选中"：先清除所有卡的"用户选中"状态（不碰连线色）
 					for (KanbanCard c : cards) {
-						if (SELECTED_ROW_COLOR.equals(c.getRowHighlightColor())) {
+						if (c.getUserSelectedRowIndex() >= 0
+								&& SELECTED_ROW_COLOR.equals(c.getRowHighlightColor())) {
+							c.setUserSelectedRowIndex(-2);
 							c.setSelectedRowIndex(-2);
 							c.setRowHighlightColor(null);
 						}
 					}
+					card.setUserSelectedRowIndex(rowIndex);
 					card.setSelectedRowIndex(rowIndex);
 					card.setRowHighlightColor(SELECTED_ROW_COLOR);
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));

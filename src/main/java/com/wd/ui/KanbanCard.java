@@ -54,6 +54,15 @@ public class KanbanCard {
 	/** 行高亮颜色（null 表示不高亮） */
 	private java.awt.Color rowHighlightColor = null;
 
+	/**
+	 * 用户手动选中的行（独立于连线色）
+	 *
+	 * <p>与 {@link #rowHighlightColor} 配合：连线和用户选中都写到 rowHighlightColor，
+	 * 但只有用户手动选中时才会记到 userSelectedRowIndex（-2=无），
+	 * 这样清除用户选中时不会误伤连线高亮。</p>
+	 */
+	private int userSelectedRowIndex = -2;
+
 	// 样式
 	private int headerHeight = 28;
 	private int padding = 10;
@@ -195,6 +204,14 @@ public class KanbanCard {
 
 	public void setSelectedRowIndex(int index) {
 		this.selectedRowIndex = index;
+	}
+
+	public int getUserSelectedRowIndex() {
+		return userSelectedRowIndex;
+	}
+
+	public void setUserSelectedRowIndex(int index) {
+		this.userSelectedRowIndex = index;
 	}
 
 	/**
@@ -493,9 +510,10 @@ public class KanbanCard {
 			g2d.drawLine((int) bounds.getX(), (int) rowTop,
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
-			// 选中行高亮背景（在分隔线之后画，覆盖在卡片背景上）
-			// 必须同时匹配行索引，否则 rowHighlightColor 会应用到所有行导致整卡变色
-			if (i == selectedRowIndex && rowHighlightColor != null) {
+			// 行高亮背景（在分隔线之后画，覆盖在卡片背景上）
+			// 条件：行索引匹配（连线占用 selectedRowIndex + 非橙色 / 用户选中 userSelectedRowIndex + 橙色）
+			if (rowHighlightColor != null
+					&& (i == selectedRowIndex || i == userSelectedRowIndex)) {
 				g2d.setColor(rowHighlightColor);
 				g2d.fillRect(
 						(int) bounds.getX() + 1,
