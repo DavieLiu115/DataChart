@@ -3,13 +3,13 @@ package com.wd.ui;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
+import com.intellij.ui.SearchTextField;
 import com.wd.icon.PluginIcons;
 import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JTextField;
 import javax.swing.border.MatteBorder;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,7 +23,7 @@ public class DataChartView extends DialogWrapper {
 	private JPanel headerTool;
 	private JButton exportPDFButton;
 	private JButton exportPictureButton;
-	private JTextField searchTextField;
+	private SearchTextField searchTextField;
 	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
 	private JButton searchButton;
@@ -35,9 +35,9 @@ public class DataChartView extends DialogWrapper {
 		this.project = project;
 		init();
 		setupHeaderTool();
+		setupSearchField();
 		// TODO: 在此处添加图形编辑器的具体 UI 组件（画布、工具栏等）
 
-		searchTextField.setToolTipText("Please input search content");
 		searchButton.setIcon(PluginIcons.search);
 		fullScreamButton.setIcon(PluginIcons.fullScream);
 		exportPDFButton.setIcon(PluginIcons.export);
@@ -53,6 +53,32 @@ public class DataChartView extends DialogWrapper {
 			return;
 		}
 		headerTool.setBorder(new MatteBorder(0, 0, 1, 0, JBColor.border()));
+	}
+
+	/**
+	 * 初始化搜索框：设置占位符、历史最大数量、绑定搜索事件
+	 */
+	private void setupSearchField() {
+		if (searchTextField == null) {
+			return;
+		}
+		searchTextField.setToolTipText("Please input search content");
+		searchTextField.getTextEditor().getEmptyText().setText("Search");
+		searchTextField.setHistorySize(10);
+		searchButton.addActionListener(e -> doSearch());
+		searchTextField.getTextEditor().addActionListener(e -> doSearch());
+	}
+
+	/**
+	 * 执行搜索逻辑
+	 */
+	private void doSearch() {
+		String keyword = searchTextField.getText();
+		if (keyword == null || keyword.isEmpty()) {
+			return;
+		}
+		searchTextField.addCurrentTextToHistory();
+		// TODO: 在此处编写实际的搜索逻辑
 	}
 
 	@Override
