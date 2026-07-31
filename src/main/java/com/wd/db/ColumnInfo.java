@@ -7,12 +7,16 @@ package com.wd.db;
  */
 public class ColumnInfo {
 
-	private final String name;
-	private final String type;
-	private final String comment;
-	private final boolean isPrimaryKey;
-	private final boolean isNullable;
-	private final boolean isIndexed;
+	private String name;
+	private String type;
+	private String comment;
+	private boolean isPrimaryKey;
+	private boolean isNullable;
+	private boolean isIndexed;
+
+	/** fastjson 反序列化需要的无参构造器 */
+	public ColumnInfo() {
+	}
 
 	public ColumnInfo(String name, String type, String comment,
 			boolean isPrimaryKey, boolean isNullable, boolean isIndexed) {
@@ -28,24 +32,48 @@ public class ColumnInfo {
 		return name;
 	}
 
+	public void setName(String name) {
+		this.name = name == null ? "" : name;
+	}
+
 	public String getType() {
 		return type;
+	}
+
+	public void setType(String type) {
+		this.type = type == null ? "" : type;
 	}
 
 	public String getComment() {
 		return comment;
 	}
 
+	public void setComment(String comment) {
+		this.comment = comment == null ? "" : comment;
+	}
+
 	public boolean isPrimaryKey() {
 		return isPrimaryKey;
+	}
+
+	public void setPrimaryKey(boolean primaryKey) {
+		isPrimaryKey = primaryKey;
 	}
 
 	public boolean isNullable() {
 		return isNullable;
 	}
 
+	public void setNullable(boolean nullable) {
+		isNullable = nullable;
+	}
+
 	public boolean isIndexed() {
 		return isIndexed;
+	}
+
+	public void setIndexed(boolean indexed) {
+		isIndexed = indexed;
 	}
 
 	@Override

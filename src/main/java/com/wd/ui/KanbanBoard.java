@@ -102,6 +102,12 @@ public class KanbanBoard extends JPanel {
 
 	/** 当前连线颜色索引（循环分配） */
 	private int connectionColorIndex = 0;
+
+	/** 行选中高亮颜色（用户点击选中行时使用） */
+	private static final Color SELECTED_ROW_COLOR = new Color(0xFE9933);
+
+	/** 连线模式临时高亮颜色（半透明粉色，标识当前正在连的行） */
+	private static final Color CONNECTION_PREVIEW_COLOR = new Color(0xFFB6E1);
 	private static final double DEFAULT_CARD_HEIGHT = 130;
 	private static final double CARD_HSPACE = 30;
 	private static final double CARD_VSPACE = 30;
@@ -179,26 +185,25 @@ public class KanbanBoard extends JPanel {
 				lastPoint = e.getPoint();
 				requestFocusInWindow();
 
-				// 检查右键 - 直接返回，不弹菜单
-				if (e.isPopupTrigger()) {
-					return;
-				}
-
 				KanbanCard card = findCardAt(e.getPoint());
 				if (card != null) {
-					// 点击了卡片：检查是否点击了行 → 进入连线模式
 					Point2D transformedPoint = transformPoint(e.getPoint());
 					int rowIndex = card.getRowIndexAt(
 							transformedPoint.getX(), transformedPoint.getY());
 					if (rowIndex >= 0) {
-						// 点到某一行：开始连线（源 = 该行）
-						connectionSource = card;
-						connectionSourceRow = rowIndex;
-						card.setSelectedRowIndex(rowIndex);
-						connectionCurrentPoint = transformedPoint;
-						isConnecting = true;
-						setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
-						repaint();
+						// 点击了某一行
+						if (e.isPopupTrigger() || e.getButton() == MouseEvent.BUTTON3) {
+							// 右键点击：开始连线
+							connectionSource = card;
+							connectionSourceRow = rowIndex;
+							connectionCurrentPoint = transformedPoint;
+							isConnecting = true;
+							setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+							repaint();
+						} else {
+							// 左键点击：切换普通选中（橙色 #FE9933）
+							toggleRowSelection(card, rowIndex);
+						}
 						return;
 					}
 					// 否则：拖拽卡片
@@ -239,9 +244,12 @@ public class KanbanBoard extends JPanel {
 									targetCard, targetRow);
 						}
 					}
-					// 退出连线模式（清除所有行高亮）
-					if (connectionSource != null) {
-						connectionSource.setSelectedRowIndex(-2);
+					// 退出连线模式：只清除连线预览色高亮，保留用户选中色
+					for (KanbanCard c : cards) {
+						if (CONNECTION_PREVIEW_COLOR.equals(c.getRowHighlightColor())) {
+							c.setSelectedRowIndex(-2);
+							c.setRowHighlightColor(null);
+						}
 					}
 					connectionSource = null;
 					connectionSourceRow = -2;
@@ -262,19 +270,24 @@ public class KanbanBoard extends JPanel {
 					// 连线模式：更新预览线终点，并高亮目标行
 					connectionCurrentPoint = transformPoint(e.getPoint());
 					KanbanCard targetCard = findCardAt(e.getPoint());
-					// 清除所有卡片的高亮
+					// 只清除"连线预览色"高亮（保留用户选中的橙色 #FE9933）
 					for (KanbanCard c : cards) {
-						c.setSelectedRowIndex(-2);
+						if (CONNECTION_PREVIEW_COLOR.equals(c.getRowHighlightColor())) {
+							c.setSelectedRowIndex(-2);
+							c.setRowHighlightColor(null);
+						}
 					}
-					// 高亮源行 + 目标行
+					// 高亮源行 + 目标行（用粉色预览色）
 					if (connectionSource != null) {
 						connectionSource.setSelectedRowIndex(connectionSourceRow);
+						connectionSource.setRowHighlightColor(CONNECTION_PREVIEW_COLOR);
 					}
 					if (targetCard != null && targetCard != connectionSource) {
 						Point2D tp = transformPoint(e.getPoint());
 						int targetRow = targetCard.getRowIndexAt(tp.getX(), tp.getY());
 						if (targetRow >= 0) {
 							targetCard.setSelectedRowIndex(targetRow);
+							targetCard.setRowHighlightColor(CONNECTION_PREVIEW_COLOR);
 						}
 					}
 					repaint();
@@ -336,18 +349,13 @@ public class KanbanBoard extends JPanel {
 						? Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
 						: Cursor.getPredefinedCursor(Cursor.DEFAULT_CURSOR));
 
-				// 悬停高亮 + tooltip
+				// 只更新 tooltip（不改变高亮），高亮由点击/连线模式控制
 				if (card != null) {
 					Point2D transformedPoint = transformPoint(e.getPoint());
 					int rowIndex = card.getRowIndexAt(
 							transformedPoint.getX(), transformedPoint.getY());
-					// 清除所有行高亮
-					for (KanbanCard c : cards) {
-						c.setSelectedRowIndex(-2);
-					}
 					if (rowIndex >= 0) {
-						card.setSelectedRowIndex(rowIndex);
-						// 设置 tooltip 显示完整注释
+						// 字段 tooltip（仅注释）
 						com.wd.db.TableInfo ti = card.getTableInfo();
 						if (ti != null && rowIndex < ti.getColumns().size()) {
 							com.wd.db.ColumnInfo col = ti.getColumns().get(rowIndex);
@@ -366,21 +374,46 @@ public class KanbanBoard extends JPanel {
 					} else {
 						KanbanBoard.this.setToolTipText(null);
 					}
-					repaint();
 				} else {
 					KanbanBoard.this.setToolTipText(null);
-					repaint();
 				}
 			}
 
-			// 给 mouseDragged 等已存在的 handler 添加 tooltip 清理逻辑，避免拖拽时遗留
+			// 给 mouseDragged 等已存在的 handler 添加 tooltip 清理逻辑
 			private void clearTooltipAndHighlight() {
 				KanbanBoard.this.setToolTipText(null);
-				if (!isConnecting) {
+			}
+
+			/**
+			 * 切换行选中状态（左键单击行时调用）
+			 *
+			 * <ul>
+			 *   <li>未选中 → 选中（橙色 #FE9933），同时清除其他表相同状态的选中</li>
+			 *   <li>已选中 → 取消选中</li>
+			 *   <li>被连线占用的行（行高亮颜色不是 SELECTED_ROW_COLOR）→ 不响应切换</li>
+			 * </ul>
+			 */
+			private void toggleRowSelection(KanbanCard card, int rowIndex) {
+				int currentIndex = card.getSelectedRowIndex();
+				Color currentColor = card.getRowHighlightColor();
+				if (currentIndex == rowIndex && SELECTED_ROW_COLOR.equals(currentColor)) {
+					// 已是"用户选中"状态 → 取消
+					card.setSelectedRowIndex(-2);
+					card.setRowHighlightColor(null);
+					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+				} else {
+					// 切换为"用户选中"（先清除所有卡的"用户选中"状态）
 					for (KanbanCard c : cards) {
-						c.setSelectedRowIndex(-2);
+						if (SELECTED_ROW_COLOR.equals(c.getRowHighlightColor())) {
+							c.setSelectedRowIndex(-2);
+							c.setRowHighlightColor(null);
+						}
 					}
+					card.setSelectedRowIndex(rowIndex);
+					card.setRowHighlightColor(SELECTED_ROW_COLOR);
+					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				}
+				repaint();
 			}
 		};
 
@@ -846,27 +879,25 @@ public class KanbanBoard extends JPanel {
 		connectionColorIndex++;
 		Connection conn = new Connection(source, sourceRow, target, targetRow, color);
 		connections.add(conn);
+		// 两端行高亮用线的颜色
+		source.setSelectedRowIndex(sourceRow);
+		source.setRowHighlightColor(color);
+		target.setSelectedRowIndex(targetRow);
+		target.setRowHighlightColor(color);
 		repaint();
 		notifyBoardChanged();
 		return conn;
 	}
 
 	/**
-	 * 构建字段的 tooltip（完整字段信息）
+	 * 构建字段的 tooltip（仅显示注释）
 	 */
 	private String buildColumnTooltip(com.wd.db.ColumnInfo col) {
-		StringBuilder sb = new StringBuilder();
-		sb.append("<html>");
-		sb.append("列名: <b>").append(col.getName()).append("</b><br/>");
-		sb.append("类型: ").append(col.getType()).append("<br/>");
-		sb.append("主键: ").append(col.isPrimaryKey() ? "是" : "否").append("<br/>");
-		sb.append("可空: ").append(col.isNullable() ? "是" : "否").append("<br/>");
-		sb.append("索引: ").append(col.isIndexed() ? "是" : "否").append("<br/>");
-		if (col.getComment() != null && !col.getComment().isEmpty()) {
-			sb.append("注释: ").append(col.getComment());
+		String comment = col.getComment();
+		if (comment == null || comment.isEmpty()) {
+			return null;
 		}
-		sb.append("</html>");
-		return sb.toString();
+		return "<html>" + comment + "</html>";
 	}
 
 	/**

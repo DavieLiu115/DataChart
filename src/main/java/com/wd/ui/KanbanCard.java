@@ -51,6 +51,9 @@ public class KanbanCard {
 	/** 选中的行（-2 表示未选中，-1 表示表卡片整体被选中；>=0 表示具体列行） */
 	private int selectedRowIndex = -2;
 
+	/** 行高亮颜色（null 表示不高亮） */
+	private java.awt.Color rowHighlightColor = null;
+
 	// 样式
 	private int headerHeight = 28;
 	private int padding = 10;
@@ -192,6 +195,20 @@ public class KanbanCard {
 
 	public void setSelectedRowIndex(int index) {
 		this.selectedRowIndex = index;
+	}
+
+	/**
+	 * 设置行高亮颜色（null = 不高亮）
+	 */
+	public void setRowHighlightColor(java.awt.Color color) {
+		this.rowHighlightColor = color;
+	}
+
+	/**
+	 * 获取行高亮颜色
+	 */
+	public java.awt.Color getRowHighlightColor() {
+		return rowHighlightColor;
 	}
 
 	/**
@@ -477,8 +494,8 @@ public class KanbanCard {
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
 			// 选中行高亮背景（在分隔线之后画，覆盖在卡片背景上）
-			if (i == selectedRowIndex) {
-				g2d.setColor(ROW_HIGHLIGHT_COLOR);
+			if (i == selectedRowIndex && rowHighlightColor != null) {
+				g2d.setColor(rowHighlightColor);
 				g2d.fillRect(
 						(int) bounds.getX() + 1,
 						(int) rowTop + 1,
