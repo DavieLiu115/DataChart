@@ -2,7 +2,6 @@ package com.wd.ui;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
-import java.awt.BorderLayout;
 import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -24,6 +23,8 @@ public class DataChartView extends DialogWrapper {
 	private JTextField searchTextField;
 	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
+	private JPanel dataView;
+	private JButton searchButton;
 	private Project project;
 
 	public DataChartView(@Nullable Project project) {
