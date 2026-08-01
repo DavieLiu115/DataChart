@@ -164,45 +164,41 @@ public class Connection {
 	}
 
 	/**
-	 * 在端点处绘制一个"透镜"/"鱼眼"形状（两个圆弧相向弯曲组成的闭合曲线）。
+	 * 在端点处绘制"三叉/鸟爪"(Crow's foot)分叉线。
 	 *
 	 * <p>形状说明：</p>
 	 * <ul>
-	 *   <li>由两段 {@link java.awt.geom.QuadCurve2D} 组成：上弧从左顶点弯到右顶点（凸向上），
-	 *       下弧从左顶点弯到右顶点（凸向下），形成"鱼眼"形状</li>
-	 *   <li>由于上一节已保证端点前的引出线始终是水平的，形状沿连线方向是**横向延伸**的（比上下更高更扁）</li>
-	 *   <li>两端使用相同形状（不再区分 "1" / "多"），视觉更简洁一致</li>
-	 *   <li>**透镜的"近卡侧顶点"贴在卡片边缘**（外侧延伸 halfHorizontal），避免任何部分画进卡片</li>
+	 *   <li>从卡片边缘 (endpoint) 向外部引出 3 根线分支，收拢合并到主连线上 (endpoint + dirSign * forkLength)</li>
+	 *   <li>中线：直接从卡片边缘 (endpoint) 水平连接到汇合点 (cx, cy)</li>
+	 *   <li>上线：从 (endpoint.x, cy - spread) 斜着连接到汇合点 (cx, cy)</li>
+	 *   <li>下线：从 (endpoint.x, cy + spread) 斜着连接到汇合点 (cx, cy)</li>
 	 * </ul>
 	 *
 	 * @param shapeColor 形状颜色（与线色一致）
 	 */
 	private void drawEndpointShape(Graphics2D g2d, Point2D endpoint, double dirSign, Color shapeColor) {
-		double size = Math.max(8.0, strokeWidth * 4.5);
-		// 水平方向（沿线）的半长，控制点凸出 = 短轴（垂直）半高
-		double halfHorizontal = size * 0.7;
-		double halfVertical = size * 0.35;
-		// 透镜中心 = 端点 + dirSign * halfHorizontal
-		// 这样近卡侧顶点恰好落在卡片边缘 (endpoint)，不画进卡片内
-		double cx = endpoint.getX() + dirSign * halfHorizontal;
-		double cy = endpoint.getY();
+		// 分叉在水平方向的延伸长度（沿连线方向远离卡片）
+		double forkLength = Math.max(10.0, strokeWidth * 4.5);
+		// 上下分叉在卡片边缘的张开半高度
+		double spread = Math.max(6.0, strokeWidth * 2.8);
 
-		// 备份当前 stroke，画端点形状时用细一点的描边，让环看起来更精致
+		double ex = endpoint.getX();
+		double ey = endpoint.getY();
+
+		// 3根分支在主线上汇合的点
+		double cx = ex + dirSign * forkLength;
+		double cy = ey;
+
 		java.awt.Stroke oldStroke = g2d.getStroke();
 		g2d.setColor(shapeColor);
-		g2d.setStroke(new BasicStroke(Math.max(1.2f, strokeWidth * 0.85f),
-				BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+		g2d.setStroke(new BasicStroke(strokeWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
-		// "鱼眼"形状：由两段 QuadCurve2D 组成
-		//   左顶点 (cx - halfHorizontal, cy)，右顶点 (cx + halfHorizontal, cy)
-		//   上弧：控制点 (cx, cy - halfVertical * 2)，凸向上
-		//   下弧：控制点 (cx, cy + halfVertical * 2)，凸向下
-		java.awt.geom.Path2D.Double lens = new java.awt.geom.Path2D.Double();
-		lens.moveTo(cx - halfHorizontal, cy);
-		lens.quadTo(cx, cy - halfVertical * 2.0, cx + halfHorizontal, cy);
-		lens.quadTo(cx, cy + halfVertical * 2.0, cx - halfHorizontal, cy);
-		lens.closePath();
-		g2d.draw(lens);
+		// 中线：卡片边缘 (ex, ey) -> 汇合点 (cx, cy)
+		g2d.draw(new Line2D.Double(ex, ey, cx, cy));
+		// 上线：卡片边缘偏上 (ex, ey - spread) -> 汇合点 (cx, cy)
+		g2d.draw(new Line2D.Double(ex, ey - spread, cx, cy));
+		// 下线：卡片边缘偏下 (ex, ey + spread) -> 汇合点 (cx, cy)
+		g2d.draw(new Line2D.Double(ex, ey + spread, cx, cy));
 
 		g2d.setStroke(oldStroke);
 	}
