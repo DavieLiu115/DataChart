@@ -5,7 +5,6 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.CubicCurve2D;
-import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 
@@ -23,9 +22,6 @@ public class Connection {
 	private static final double LEAD_MIN = 24.0;
 	/** 起点/终点水平引出线长度上限（画板坐标，px） */
 	private static final double LEAD_MAX = 60.0;
-
-	/** 端点椭圆中心向外偏移距离（画板坐标，px），让椭圆大部分露在卡片外，更醒目 */
-	private static final double ELLIPSE_OFFSET = 6.0;
 
 	private final KanbanCard source;
 	private final int sourceRow;
@@ -159,48 +155,54 @@ public class Connection {
 		g2d.draw(new Line2D.Double(leadEndX, leadEndY,
 				targetPoint.getX(), targetPoint.getY()));
 
-		// 在源/目标端点处画开口椭圆（关系端点标识），用与线相同的颜色
-		// 由于端点前一段是水平的，椭圆长轴 = 竖直方向，与连线方向垂直
-		// 椭圆中心向外偏移 = 远离卡片：sourcePoint 在源卡右边 → 向右偏移；targetPoint 在目标卡左边 → 向左偏移
+		// 在源/目标端点处画"鱼眼"/"透镜"形状（关系端点标识），用与线相同的颜色
+		// 由于端点前一段是水平的，形状沿连线方向横向延伸
+		// 形状中心向外偏移 = 远离卡片：sourcePoint 在源卡右边 → 向右偏移；targetPoint 在目标卡左边 → 向左偏移
 		// 偏移方向与连接方向无关（源/目标点的几何位置就决定"外侧"）
 		drawEndpointShape(g2d, sourcePoint, +1, lineColor);
 		drawEndpointShape(g2d, targetPoint, -1, lineColor);
 	}
 
 	/**
-	 * 在端点处绘制一个开口椭圆（"环"/"眼"形状），用于标识关系端点。
+	 * 在端点处绘制一个"透镜"/"鱼眼"形状（两个圆弧相向弯曲组成的闭合曲线）。
 	 *
 	 * <p>形状说明：</p>
 	 * <ul>
-	 *   <li>椭圆中心在端点处，**长轴垂直于连线方向，短轴沿连线方向**</li>
-	 *   <li>由于上一节已保证端点前的引出线始终是水平的，因此椭圆长轴 = 竖直方向</li>
+	 *   <li>由两段 {@link java.awt.geom.QuadCurve2D} 组成：上弧从左顶点弯到右顶点（凸向上），
+	 *       下弧从左顶点弯到右顶点（凸向下），形成"鱼眼"形状</li>
+	 *   <li>由于上一节已保证端点前的引出线始终是水平的，形状沿连线方向是**横向延伸**的（比上下更高更扁）</li>
 	 *   <li>两端使用相同形状（不再区分 "1" / "多"），视觉更简洁一致</li>
-	 *   <li>为让端点标识更醒目，椭圆整体**向外（远离卡片）偏移 ELLIPSE_OFFSET**，避免一半被卡片遮挡</li>
+	 *   <li>**透镜的"近卡侧顶点"贴在卡片边缘**（外侧延伸 halfHorizontal），避免任何部分画进卡片</li>
 	 * </ul>
 	 *
 	 * @param shapeColor 形状颜色（与线色一致）
 	 */
 	private void drawEndpointShape(Graphics2D g2d, Point2D endpoint, double dirSign, Color shapeColor) {
 		double size = Math.max(8.0, strokeWidth * 4.5);
-		// 椭圆长轴（垂直）= size * 1.6，短轴（水平，沿线）= size * 0.7
-		double halfMajor = size * 0.8;
-		double halfMinor = size * 0.35;
-		// 椭圆中心向"远离卡片"方向偏移 ELLIPSE_OFFSET，避免一半被卡片遮挡
-		double offsetX = dirSign * ELLIPSE_OFFSET;
+		// 水平方向（沿线）的半长，控制点凸出 = 短轴（垂直）半高
+		double halfHorizontal = size * 0.7;
+		double halfVertical = size * 0.35;
+		// 透镜中心 = 端点 + dirSign * halfHorizontal
+		// 这样近卡侧顶点恰好落在卡片边缘 (endpoint)，不画进卡片内
+		double cx = endpoint.getX() + dirSign * halfHorizontal;
+		double cy = endpoint.getY();
 
-		// 备份当前 stroke，画椭圆时用细一点的描边，让环看起来更精致
+		// 备份当前 stroke，画端点形状时用细一点的描边，让环看起来更精致
 		java.awt.Stroke oldStroke = g2d.getStroke();
 		g2d.setColor(shapeColor);
 		g2d.setStroke(new BasicStroke(Math.max(1.2f, strokeWidth * 0.85f),
 				BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
-		// 椭圆：以端点向外偏移后为中心，长轴竖直（y 方向），短轴水平（x 方向）
-		// Ellipse2D 的 x/y 是左上角坐标，width/height 是宽/高
-		g2d.draw(new Ellipse2D.Double(
-				endpoint.getX() + offsetX - halfMinor,
-				endpoint.getY() - halfMajor,
-				halfMinor * 2.0,
-				halfMajor * 2.0));
+		// "鱼眼"形状：由两段 QuadCurve2D 组成
+		//   左顶点 (cx - halfHorizontal, cy)，右顶点 (cx + halfHorizontal, cy)
+		//   上弧：控制点 (cx, cy - halfVertical * 2)，凸向上
+		//   下弧：控制点 (cx, cy + halfVertical * 2)，凸向下
+		java.awt.geom.Path2D.Double lens = new java.awt.geom.Path2D.Double();
+		lens.moveTo(cx - halfHorizontal, cy);
+		lens.quadTo(cx, cy - halfVertical * 2.0, cx + halfHorizontal, cy);
+		lens.quadTo(cx, cy + halfVertical * 2.0, cx - halfHorizontal, cy);
+		lens.closePath();
+		g2d.draw(lens);
 
 		g2d.setStroke(oldStroke);
 	}

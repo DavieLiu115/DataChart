@@ -101,9 +101,12 @@ public final class BoardContextMenu {
 	}
 
 	/**
-	 * 创建表头右键菜单（统一两项：复制表名 / 复制注释）。
+	 * 创建表头右键菜单（复制表名 / 复制注释 / 同步表结构）。
+	 *
+	 * @param info         表元信息
+	 * @param onSyncStructure 同步表结构回调（重新获取元信息并刷新卡片）；可为 null 表示不显示该项
 	 */
-	public static JPopupMenu buildHeaderMenu(TableInfo info) {
+	public static JPopupMenu buildHeaderMenu(TableInfo info, Runnable onSyncStructure) {
 		if (info == null) {
 			return null;
 		}
@@ -118,6 +121,13 @@ public final class BoardContextMenu {
 		copyComment.setEnabled(comment != null && !comment.isEmpty());
 		copyComment.addActionListener(e -> copyToClipboard(comment));
 		menu.add(copyComment);
+
+		if (onSyncStructure != null) {
+			JMenuItem syncItem = buildStyledMenuItem("同步表结构");
+			syncItem.setToolTipText("重新获取表结构信息");
+			syncItem.addActionListener(e -> onSyncStructure.run());
+			menu.add(syncItem);
+		}
 
 		return menu;
 	}

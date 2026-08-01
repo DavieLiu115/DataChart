@@ -301,6 +301,30 @@ public class KanbanCard {
 	}
 
 	/**
+	 * 替换卡片绑定的表元信息（用于"同步表结构"等场景）。
+	 *
+	 * <p>替换后会按新列数重新计算高度（保持当前宽度不变，因为用户可能调整过）。</p>
+	 *
+	 * @param newInfo 新的表元信息（null 则不修改）
+	 */
+	public void setTableInfo(TableInfo newInfo) {
+		if (newInfo == null) {
+			return;
+		}
+		this.tableInfo = newInfo;
+		// 同步更新卡片 title/description（与 forTable 构造时保持一致）
+		this.name = newInfo.getName();
+		this.description = newInfo.getComment();
+		// 重新计算高度（按列数）
+		int colCount = newInfo.getColumns() == null ? 0 : newInfo.getColumns().size();
+		double rowH = ROW_HEIGHT;
+		double bodyH = colCount * rowH;
+		// 上限 400（防止某些表字段过多时撑爆卡片）
+		double h = Math.min(400.0, Math.max(50.0, headerHeight + bodyH + padding));
+		bounds.setRect(bounds.getX(), bounds.getY(), bounds.getWidth(), h);
+	}
+
+	/**
 	 * 获取当前主题下的卡片背景色
 	 *
 	 * <p>2026-08-01 暴露：供 {@code KanbanBoard.paintForExport} 在导出时使用，

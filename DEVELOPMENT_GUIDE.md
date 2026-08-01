@@ -106,24 +106,22 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - `RelationType` 字段保留（持久化到 JSON），但目前不再影响渲染
 - 形状大小随线宽缩放（`Math.max(8.0, strokeWidth * 4.5)`），描边略细于线本身
 
-#### 水平引出线 + 贝塞尔曲线 + 开口椭圆（需求 19、20、21）
+#### 水平引出线 + 贝塞尔曲线 + 端点"鱼眼"形状（需求 19、20、21、23）
 - **问题（需求 19）**：之前直接从 `sourcePoint` 到 `targetPoint` 走 CubicCurve，当源/终点 Y 不对齐时，曲线进入/离开卡片处是斜的，鸟爪/竖线也跟着倾斜，看起来别扭
 - **问题（需求 20）**：需求 19 修复后，"1"端竖线虽然垂直了，但"多"端三叉还是斜的（因为连线方向是斜的），整体仍显歪斜
-- **问题（需求 21）**：椭圆有一半被卡片遮住，不够醒目
+- **问题（需求 21）**：椭圆有一半被卡片遮住，不够醒目 → 椭圆尺寸放大 + 向外偏移
+- **问题（需求 23）**：放大后椭圆看起来像个**圆圈**，不够"透镜"感 → 改为"鱼眼"/"透镜"形状（两段 QuadCurve 组成）
 - **方案**：
   1. 在源/终点各加一段水平直线（"引出线"），中间用 CubicCurve 连接
      - 引出线长度 `leadLen = clamp(|dx|/3, 24, 60)` 画板坐标
      - `dirSign = sign(dx)` 支持右→左连线
-  2. 端点形状统一改为**开口椭圆**（不再区分 "1"/"多"）：
-     - 长轴垂直于连线方向 = 竖直方向（因为引出线始终水平）
-     - 短轴沿连线方向 = 水平方向
-  3. 椭圆尺寸 + 向外偏移（需求 21）：
-     - 长轴半长 `size * 0.8`（垂直），短轴半长 `size * 0.35`（水平）
-     - 椭圆中心向外偏移 `ELLIPSE_OFFSET = 6.0` 画板坐标
-       - 起点（sourcePoint 在源卡右边）→ 向右偏移
-       - 终点（targetPoint 在目标卡左边）→ 向左偏移
-       - 偏移方向与连接方向无关（几何位置决定"外侧"）
-- **常量**：`Connection.LEAD_MIN = 24.0`、`LEAD_MAX = 60.0`、`ELLIPSE_OFFSET = 6.0`
+  2. 端点形状由"开口椭圆"改为**"鱼眼"/"透镜"形状**（需求 23）：
+     - 由两段 `QuadCurve2D` 组成：上弧（控制点凸向上）+ 下弧（控制点凸向下）
+     - 左/右顶点 `(cx ∓ halfHorizontal, cy)`，控制点 `(cx, cy ∓ halfVertical*2)`
+     - 形成"鱼眼"/"透镜"形状，**沿连线方向（水平）横向延伸**，比上下更扁
+     - 水平半长 `size * 0.7`，垂直半高（控制点凸出量）`size * 0.35`
+  3. 透镜中心 = 端点 + dirSign * halfHorizontal（需求 24），保证**近卡侧顶点恰好落在卡片边缘**，不画进卡片
+- **常量**：`Connection.LEAD_MIN = 24.0`、`LEAD_MAX = 60.0`（取消 `ELLIPSE_OFFSET`，几何上不需要）
 - **取舍**：放弃区分 "1"/"多" 的 ER 标注，改为两端同形，整体更简洁
 
 #### 起点背景色同步整条连线（需求 1）
@@ -152,7 +150,8 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 #### 复制到剪贴板（需求 3、4）
 - 使用 `java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()` + `StringSelection`
 - 不使用 IntelliJ 的 `CopyPasteManager`，因为本组件不依赖 IDE 编辑器上下文
-- 表头右键统一弹"复制表名 / 复制注释"两个菜单项（不再分左右半）
+- 表头右键统一弹"复制表名 / 复制注释 / 同步表结构"三个菜单项（不再分左右半）
+  - "同步表结构"调 `TableMetadataService.getFetcher().fetchTableInfo` 重新拉取，成功后 `KanbanCard.setTableInfo` 替换 + 重绘 + 通知内容变更
 - 列行右键分左右半：
   - 左半（列名+类型，hit test 用 `KanbanCard.getColumnNameRightX()`）→ 弹"复制列名/复制注释"菜单
   - 右半（注释区域）→ 走连线模式
@@ -317,7 +316,7 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - **KanbanBoard 桥接**：`search`/`clearSearch`/`focusNextSearchResult`/`focusPrevSearchResult` 调用后 `applySearchFocus()` + `repaint()`；`scrollToFocusResult` 用 `getVisibleRect()`
 
 #### BoardContextMenu（右键菜单，`com.wd.ui.BoardContextMenu`，静态工具）
-- **方法**：`buildConnectionMenu(conn, onRepaint, onNotifyChanged, onRemove)` / `buildHeaderMenu(info)` / `buildColumnMenu(col)` / `copyToClipboard(text)`
+- **方法**：`buildConnectionMenu(conn, onRepaint, onNotifyChanged, onRemove)` / `buildHeaderMenu(info, onSyncStructure)` / `buildColumnMenu(col)` / `copyToClipboard(text)`
 - **回调注入**：连线菜单通过 `Runnable onRepaint / onNotifyChanged / onRemove` 解耦，不直接调用 KanbanBoard
 - **主题适配**：`MENU_HOVER_FOREGROUND=#2470B0`（hover 蓝字）+ `patchMenuUiDefaults()`（`UIDefaults` 全局覆盖，`menuUiPatched` 标志防重复）
 - **KanbanBoard 桥接**：`showConnectionContextMenu` / `showHeaderContextMenu` / `showColumnContextMenu` 组装回调后调用工具类

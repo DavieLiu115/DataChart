@@ -1277,16 +1277,48 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 表头右键菜单（复制表名 / 复制注释）。
+	 * 表头右键菜单（复制表名 / 复制注释 / 同步表结构）。
 	 */
 	private void showHeaderContextMenu(KanbanCard card, java.awt.Point screenPoint) {
 		if (card == null) {
 			return;
 		}
-		javax.swing.JPopupMenu menu = BoardContextMenu.buildHeaderMenu(card.getTableInfo());
+		javax.swing.JPopupMenu menu = BoardContextMenu.buildHeaderMenu(
+				card.getTableInfo(), () -> syncTableStructure(card));
 		if (menu != null) {
 			menu.show(this, screenPoint.x, screenPoint.y);
 		}
+	}
+
+	/**
+	 * 同步指定卡片的表结构：重新获取元信息，更新卡片并重绘。
+	 *
+	 * <p>从 {@link com.wd.db.TableMetadataService} 拿到 fetcher，
+	 * 调用 {@code fetchTableInfo(project, datasource, tableName)} 拉取最新表结构，
+	 * 成功后通过 {@link KanbanCard#setTableInfo} 替换卡片绑定。</p>
+	 *
+	 * <p>失败时弹错误提示（不动卡片）。</p>
+	 */
+	private void syncTableStructure(KanbanCard card) {
+		if (card == null || card.getTableInfo() == null || project == null) {
+			return;
+		}
+		TableInfo old = card.getTableInfo();
+		String dsName = old.getDatasourceName();
+		String tableName = old.getName();
+		com.wd.db.TableMetadataService svc =
+				com.wd.db.TableMetadataService.getInstance(project);
+		TableInfo fresh = svc.getFetcher().fetchTableInfo(project, dsName, tableName);
+		if (fresh == null) {
+			NotificationUtil.error("同步失败",
+					"无法获取表结构：" + tableName + "（数据源：" + dsName + "）");
+			return;
+		}
+		card.setTableInfo(fresh);
+		notifyBoardChanged();
+		repaint();
+		NotificationUtil.info("同步成功",
+				"已重新获取 " + tableName + "（" + fresh.getColumns().size() + " 列）");
 	}
 
 	/**
