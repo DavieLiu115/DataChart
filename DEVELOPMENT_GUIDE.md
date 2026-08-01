@@ -220,18 +220,25 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - **通知**：成功后用 `Notifications.Bus.notify(Notification("DataChart", ...))` 弹系统通知，失败给 Error 通知
 - **空画板**：cards.isEmpty() 时直接给 "画板为空，无内容可导出" 通知，不弹文件框
 - **iText 字体映射器**：`DefaultFontMapper` 的 `awtToPdf` 自定义返回 `BaseFont`（中文 STSong → simsun → 默认）
-- **画板坐标变换**：`paintForExport` 中 `g2.translate(-minX, -minY)` 把卡片相对位置平移到输出 (0,0) 起点
+- **画板坐标变换**：`paintForExport` 中 `g2.translate(-minX, -minY)` + `g2.scale(s, s)`，transform 链 = `scale ∘ translate`，最终 `T(P) = (P - (minX, minY)) * s`
+- **导出背景色**：2026-08-01 修复"两种背景色"问题。原 `backgroundColor = Gray._240 (#F0F0F0)` 与卡片 `BG_LIGHT (#FFFFFF)` 不一致。导出时硬编码用 `KanbanCard.getCardBackgroundColor(dark)`（与卡片同色），让画板 = 卡片，导出图只有一个背景色。IDE 内画板仍保持 `Gray._240`，不影响交互体验
 - **依赖**（`build.gradle.kts` 已配）：`com.itextpdf:itextpdf:5.5.13` + `com.itextpdf:itext-asian:5.2.0` + `com.twelvemonkeys.imageio:*:3.10.1`
 - **设计原则**：
   - 复用 `paintForExport` 共享 PDF / Image 绘制逻辑，避免两份 paintComponent 走偏
   - 默认文件名用 `getNameWithoutExtension()` 而非 `getName()`，避免 `.datachart` 出现在 `xxx.datachart_20260801_xxx.pdf` 这种叠加后缀
   - 后缀兼容：用户没写 .pdf / .jpg 时自动补，避免保存成无后缀文件
+  - **导出行为 vs IDE 行为分叉**：导出时的视觉策略（背景色、字体等）可以与 IDE 内不同，硬编码导出相关参数比修改全局字段更安全
 
 #### 导出图片已知问题修复（2026-08-01）
-- **黑色背景问题**：原实现 `fillRect((int) minX, (int) minY, ...)` 起点是 (minX, minY) 而非 (0, 0)，导致 BufferedImage 默认 0x000000 黑色从 (0,0) 到 (minX, minY) 区域透出，导出图片左/底部出现大块黑色
-  - **修复**：先 `g2d.translate(-minX, -minY)` 再 `fillRect(0, 0, width, height)`，从 (0,0) 开始填背景
 - **清晰度问题**：原默认 scale=1.0 导出 11pt 字体渲染到 11px 像素，字小且模糊
   - **修复**：默认 scale 改为 2.0（2x 高 DPI），字号 / stroke 自动放大；`KEY_FRACTIONALMETRICS_ON` 启用子像素精度
-  - `paintForExport` 增加 `scale` 参数：先 `translate(-minX, -minY)` 再 `scale(s, s)`，transform 链 = scale ∘ translate，最终 `T(P) = (P-min)*scale + 0`，让 (min, min) 落在像素 (0,0)、(min+w, min+h) 落在 (w*s, h*s) = BufferedImage 实际大小
+  - `paintForExport` 增加 `scale` 参数：先 `translate(-minX, -minY)` 再 `scale(s, s)`，transform 链 = `scale ∘ translate`，最终 `T(P) = (P - (minX, minY)) * s`
+- **黑色背景问题**（填 rect 起点错误）：
+  - **根因**：g2d transform 链 = `scale ∘ translate(-minX, -minY)`，所以 `T((0, 0)) = (-minX*s, -minY*s)` 落在 BufferedImage 外，`fillRect(0, 0, w, h)` 不会覆盖完整 BufferedImage
+  - **修复**：`fillRect((int) minX, (int) minY, w, h)` 用 exportArea 起点（=卡片合并 - 40 padding）作为用户坐标起点，transform 后正好落在设备 (0, 0)
+- **居中问题**（calculateTotalBounds padding 不对称）：
+  - **根因**：原 `Rectangle(minX-40, minY-40, w+80, h+80)` 上下对称但**左右不对称**（如果 minX 不在 0）
+  - **修复**：以"卡片合并中心"为锚点，加对称 padding：`center ± (extent/2 + padding)`
+  - 实际画板坐标值与旧 `minX-40` 相同，但语义清晰：四面对称 padding
 - **API 重载**：`paintForExport(g2d, area, dark)` 重载为 `paintForExport(g2d, area, dark, scale)`，scale=1.0 保持原行为
 - **PDF 不传 scale**：PDF 是矢量，scale 始终 1.0，由 `document` 的 `Rectangle(width, height)` 决定尺寸

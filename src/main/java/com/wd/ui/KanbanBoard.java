@@ -1095,8 +1095,17 @@ public class KanbanBoard extends JPanel {
 			}
 		}
 		int padding = 40;
-		return new Rectangle2D.Double(minX - padding, minY - padding,
-				(maxX - minX) + 2 * padding, (maxY - minY) + 2 * padding);
+		// 用对称 padding（围绕卡片合并中心）替代"min - 40"非对称 padding：
+		// 旧实现 `(minX - 40, minY - 40, w+80, h+80)` 在卡片远离画板原点 (0, 0) 时，
+		// 上下 padding 不对称（比如 minX=140 时左边 padding=140+40=180，右边=40），
+		// 导致导出图视觉上"卡片偏左"。新版用"内容中心 + 对称 padding"，
+		// 让 exportArea 中心 = 卡片合并中心，padding 四面对称（各 40）。
+		double contentCenterX = (minX + maxX) / 2.0;
+		double contentCenterY = (minY + maxY) / 2.0;
+		double halfW = (maxX - minX) / 2.0 + padding;
+		double halfH = (maxY - minY) / 2.0 + padding;
+		return new Rectangle2D.Double(contentCenterX - halfW, contentCenterY - halfH,
+				halfW * 2, halfH * 2);
 	}
 
 	/**
@@ -1146,21 +1155,32 @@ public class KanbanBoard extends JPanel {
 		int width = (int) exportArea.getWidth();
 		int height = (int) exportArea.getHeight();
 
-		// 1. 先应用 scale 缩放（影响后续所有 stroke / font 宽度）
-		// 2. 再平移使 (minX, minY) 到 (0, 0) —— 必须先平移，否则 fillRect 起点 (minX, minY)
-		//    不会覆盖到 (0,0) 区域，导致 BufferedImage 初始黑色透出来
-		// 注意：scale 之后 fillRect 的 (0,0, width, height) 仍然在用户坐标空间（因为 g2d 的
-		// transform 链是 scale * translate）。这里 width/height 不乘 scale，因为 BufferedImage
-		// 大小已经预先按 scale 放大；paintForExport 接收的是逻辑 exportArea
+		// 1. 先平移使 exportArea 起点 (minX, minY) 到 (0, 0)
 		g2d.translate(-minX, -minY);
+		// 2. 再 scale（影响后续所有 stroke / font 宽度）
 		if (scale != 1.0) {
 			g2d.scale(scale, scale);
 		}
 
-		// 3. 绘制背景（不透明，从 (0,0) 开始填到 (width, height)，避免黑色透出）
-		//    在 scale 后的坐标系下，宽高应该按 exportArea 的逻辑尺寸
-		g2d.setColor(backgroundColor);
-		g2d.fillRect(0, 0, width, height);
+		// 3. 绘制背景（必须从画板坐标 (minX, minY) 开始填到 (minX+width, minY+height)）
+		//    原因：g2d 的 transform 链是 scale ∘ translate，T(P) = (P - (minX, minY)) * scale。
+		//    exportArea 在画板坐标中是 (minX-40, minY-40, width, height)（来自 calculateTotalBounds，
+		//    这里 minX 是真实卡片最小 x 减 40）。
+		//    - fillRect 起点 = (exportArea.getX(), exportArea.getY()) 落在设备 (0, 0)
+		//    - fillRect 终点 = (exportArea.getX()+width, ...) 落在设备 (width*scale, height*scale)
+		//    所以背景完整覆盖 BufferedImage，避免黑色透出。
+		//    注意：之前用 fillRect(0, 0, width, height) 错把画板 (0, 0) 当成设备 (0, 0)，
+		//    导致 fillRect 在设备坐标上落在 (-minX*scale, -minY*scale) 起点，
+		//    左/上溢出到 BufferedImage 外，右/下不足，黑色背景从缺口透出。
+		//
+		//    颜色选择：2026-08-01 修复"两种背景色"问题。
+		//    原 backgroundColor = Gray._240 (#F0F0F0)，与卡片 BG_LIGHT (#FFFFFF) 不一致，
+		//    导出 PDF / 图片时画板是浅灰、卡片是白色，看起来"两个颜色"。
+		//    导出时用 KanbanCard.getCardBackgroundColor(dark)（与卡片背景同色），
+		//    浅色主题下画板=白，深色主题下画板=深灰，让整个导出图只有一个背景色。
+		//    IDE 内的画板仍保持 Gray._240，不影响交互体验。
+		g2d.setColor(KanbanCard.getCardBackgroundColor(dark));
+		g2d.fillRect((int) minX, (int) minY, width, height);
 
 		// 4. 绘制网格
 		if (showGrid) {

@@ -182,6 +182,19 @@ public class KanbanCard {
 		return tableInfo;
 	}
 
+	/**
+	 * 获取当前主题下的卡片背景色
+	 *
+	 * <p>2026-08-01 暴露：供 {@code KanbanBoard.paintForExport} 在导出时使用，
+	 * 让画板背景 = 卡片背景，避免"两种背景色"问题。</p>
+	 *
+	 * @param dark 是否深色主题（与 {@code KanbanBoard.isDarkTheme()} 一致）
+	 * @return 卡片背景色（浅色: #FFFFFF，深色: #3C3F41）
+	 */
+	public static Color getCardBackgroundColor(boolean dark) {
+		return dark ? BG_DARK : BG_LIGHT;
+	}
+
 	/** 是否表格模式（带有 TableInfo 元数据） */
 	public boolean isTableMode() {
 		return tableInfo != null;
