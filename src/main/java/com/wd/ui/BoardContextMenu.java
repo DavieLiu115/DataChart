@@ -30,6 +30,11 @@ public final class BoardContextMenu {
 	/** 菜单项 hover/selected 时的文字颜色（蓝色） */
 	private static final java.awt.Color MENU_HOVER_FOREGROUND = new java.awt.Color(0x2470B0);
 
+	/** 危险操作菜单项（删除表）文字颜色：红色，适配深色/浅色主题 */
+	private static final java.awt.Color DELETE_FOREGROUND = new JBColor(
+			new java.awt.Color(0xC62828), // 浅色主题：深红
+			new java.awt.Color(0xFF6B6B)); // 深色主题：亮红
+
 	/** 是否已对 UIManager 设置过 menu 颜色（避免重复设置） */
 	private static boolean menuUiPatched = false;
 
@@ -101,12 +106,14 @@ public final class BoardContextMenu {
 	}
 
 	/**
-	 * 创建表头右键菜单（复制表名 / 复制注释 / 同步表结构）。
+	 * 创建表头右键菜单（复制表名 / 复制注释 / 同步表结构 / 删除表）。
 	 *
 	 * @param info         表元信息
 	 * @param onSyncStructure 同步表结构回调（重新获取元信息并刷新卡片）；可为 null 表示不显示该项
+	 * @param onDeleteTable 删除表回调（效果等同 Command+Del：有连线先提示，无连线直接删除）；可为 null 表示不显示该项
 	 */
-	public static JPopupMenu buildHeaderMenu(TableInfo info, Runnable onSyncStructure) {
+	public static JPopupMenu buildHeaderMenu(TableInfo info, Runnable onSyncStructure,
+			Runnable onDeleteTable) {
 		if (info == null) {
 			return null;
 		}
@@ -127,6 +134,16 @@ public final class BoardContextMenu {
 			syncItem.setToolTipText("重新获取表结构信息");
 			syncItem.addActionListener(e -> onSyncStructure.run());
 			menu.add(syncItem);
+		}
+
+		if (onDeleteTable != null) {
+			menu.addSeparator();
+			JMenuItem deleteItem = buildStyledMenuItem("删除表");
+			deleteItem.setForeground(DELETE_FOREGROUND);
+			deleteItem.putClientProperty("MenuItem.selectionForeground", DELETE_FOREGROUND);
+			deleteItem.setToolTipText("删除该表（有连线时会先提示）");
+			deleteItem.addActionListener(e -> onDeleteTable.run());
+			menu.add(deleteItem);
 		}
 
 		return menu;

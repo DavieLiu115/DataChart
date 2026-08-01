@@ -128,6 +128,16 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - `Connection.resolveLineColor()` 优先用 `source.getHighlightedColorForRow(sourceRow)`，没有再用 palette 颜色
 - 这样当起点行被高亮（用户选中 / 关联列 / 连线占用），整条线统一为该色
 
+### 28. 同步表结构增量对比提示（需求 28）
+- **新增列**：
+  - 背景色设为浅绿色（深色主题 `#2E4A32`，浅色主题 `#D4EDDA`）
+  - 触发 300ms 从左侧向右平滑划入显示背景的动画 (`addedSlideProgress`)
+  - 该高亮为一次性纯内存状态，关闭编辑器/文件重新打开后恢复正常背景
+- **删除列**：
+  - 在卡片底部保留展示被删除的列，背景设为浅红色（深色主题 `#4A2E2E`，浅色主题 `#F8D7DA`）
+  - 绘制贯穿一整行的删除线（中划线）
+  - `deletedColumns` 为内存临时列表，不参与 `.datachart` JSON 序列化，重新打开文件后被删除列即消失
+
 #### 关联列高亮（需求 2）
 - `KanbanBoard.activeHighlightCard / activeHighlightRow`：当前用户左键选中的列
 - `KanbanBoard.refreshRelatedRows()` 在每次重绘前重新计算 `relatedRowKeys`（cardId#row 形式）
@@ -150,8 +160,10 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 #### 复制到剪贴板（需求 3、4）
 - 使用 `java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()` + `StringSelection`
 - 不使用 IntelliJ 的 `CopyPasteManager`，因为本组件不依赖 IDE 编辑器上下文
-- 表头右键统一弹"复制表名 / 复制注释 / 同步表结构"三个菜单项（不再分左右半）
+- 表头右键统一弹"复制表名 / 复制注释 / 同步表结构 / 删除表"四个菜单项（不再分左右半）
   - "同步表结构"调 `TableMetadataService.getFetcher().fetchTableInfo` 重新拉取，成功后 `KanbanCard.setTableInfo` 替换 + 重绘 + 通知内容变更
+  - "删除表"回调 `KanbanBoard.deleteCard(card)`：效果等同 Command+Del——有连线先弹二次确认，无连线直接删除并清理关联连线/搜索项
+  - "删除表"文字颜色用红色 `DELETE_FOREGROUND`（JBColor 双态：浅色深红 `#C62828` / 深色亮红 `#FF6B6B`），`MenuItem.selectionForeground` 也设红，hover 保持红色，与其他蓝色菜单项区分（危险操作视觉标识）
 - 列行右键分左右半：
   - 左半（列名+类型，hit test 用 `KanbanCard.getColumnNameRightX()`）→ 弹"复制列名/复制注释"菜单
   - 右半（注释区域）→ 走连线模式
@@ -316,7 +328,7 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - **KanbanBoard 桥接**：`search`/`clearSearch`/`focusNextSearchResult`/`focusPrevSearchResult` 调用后 `applySearchFocus()` + `repaint()`；`scrollToFocusResult` 用 `getVisibleRect()`
 
 #### BoardContextMenu（右键菜单，`com.wd.ui.BoardContextMenu`，静态工具）
-- **方法**：`buildConnectionMenu(conn, onRepaint, onNotifyChanged, onRemove)` / `buildHeaderMenu(info, onSyncStructure)` / `buildColumnMenu(col)` / `copyToClipboard(text)`
+- **方法**：`buildConnectionMenu(conn, onRepaint, onNotifyChanged, onRemove)` / `buildHeaderMenu(info, onSyncStructure, onDeleteTable)` / `buildColumnMenu(col)` / `copyToClipboard(text)`
 - **回调注入**：连线菜单通过 `Runnable onRepaint / onNotifyChanged / onRemove` 解耦，不直接调用 KanbanBoard
 - **主题适配**：`MENU_HOVER_FOREGROUND=#2470B0`（hover 蓝字）+ `patchMenuUiDefaults()`（`UIDefaults` 全局覆盖，`menuUiPatched` 标志防重复）
 - **KanbanBoard 桥接**：`showConnectionContextMenu` / `showHeaderContextMenu` / `showColumnContextMenu` 组装回调后调用工具类

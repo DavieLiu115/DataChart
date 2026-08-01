@@ -642,10 +642,20 @@ public class KanbanBoard extends JPanel {
 	 * 删除选中的卡片（删除前检查是否有连线，如有则弹二次确认）。
 	 */
 	private void deleteSelectedCard() {
-		if (selectedCard == null) {
+		if (selectedCard != null) {
+			deleteCard(selectedCard);
+		}
+	}
+
+	/**
+	 * 删除指定卡片（删除前检查是否有连线，如有则弹二次确认）。
+	 *
+	 * <p>效果等同 Command+Del：有连线先提示，无连线直接删除。</p>
+	 */
+	private void deleteCard(KanbanCard card) {
+		if (card == null) {
 			return;
 		}
-		KanbanCard card = selectedCard;
 
 		boolean hasRelations = hasRelationsFor(card.getId());
 		if (hasRelations) {
@@ -1277,14 +1287,16 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 表头右键菜单（复制表名 / 复制注释 / 同步表结构）。
+	 * 表头右键菜单（复制表名 / 复制注释 / 同步表结构 / 删除表）。
 	 */
 	private void showHeaderContextMenu(KanbanCard card, java.awt.Point screenPoint) {
 		if (card == null) {
 			return;
 		}
 		javax.swing.JPopupMenu menu = BoardContextMenu.buildHeaderMenu(
-				card.getTableInfo(), () -> syncTableStructure(card));
+				card.getTableInfo(),
+				() -> syncTableStructure(card),
+				() -> deleteCard(card));
 		if (menu != null) {
 			menu.show(this, screenPoint.x, screenPoint.y);
 		}
@@ -1314,7 +1326,7 @@ public class KanbanBoard extends JPanel {
 					"无法获取表结构：" + tableName + "（数据源：" + dsName + "）");
 			return;
 		}
-		card.setTableInfo(fresh);
+		card.setTableInfoWithDiff(fresh, this::repaint);
 		notifyBoardChanged();
 		repaint();
 		NotificationUtil.info("同步成功",

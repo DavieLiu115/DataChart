@@ -300,28 +300,99 @@ public class KanbanCard {
 		return tableInfo;
 	}
 
+	/** 增量同步差异列状态：新增列名字集合 */
+	private final java.util.Set<String> addedColumnNames = new java.util.HashSet<>();
+	/** 增量同步差异列状态：被删除列数据列表（只在内存展示删除状态，不序列化） */
+	private final java.util.List<ColumnInfo> deletedColumns = new java.util.ArrayList<>();
+	/** 新增列划入动画当前进度 (0.0 -> 1.0) */
+	private float addedSlideProgress = 1.0f;
+	/** 动画 Timer */
+	private javax.swing.Timer slideAnimTimer = null;
+
 	/**
-	 * 替换卡片绑定的表元信息（用于"同步表结构"等场景）。
+	 * 替换卡片绑定的表元信息（带增量同步对比提示）。
 	 *
-	 * <p>替换后会按新列数重新计算高度（保持当前宽度不变，因为用户可能调整过）。</p>
-	 *
-	 * @param newInfo 新的表元信息（null 则不修改）
+	 * @param newInfo 新的表元信息
+	 * @param repaintCallback 动画每一帧的回调（通常是 kanbanBoard::repaint）
 	 */
-	public void setTableInfo(TableInfo newInfo) {
+	public void setTableInfoWithDiff(TableInfo newInfo, Runnable repaintCallback) {
 		if (newInfo == null) {
 			return;
 		}
+		// 停止上一次未完成的动画
+		if (slideAnimTimer != null && slideAnimTimer.isRunning()) {
+			slideAnimTimer.stop();
+		}
+
+		addedColumnNames.clear();
+		deletedColumns.clear();
+
+		if (this.tableInfo != null && this.tableInfo.getColumns() != null && newInfo.getColumns() != null) {
+			java.util.Map<String, ColumnInfo> newColMap = new java.util.HashMap<>();
+			for (ColumnInfo col : newInfo.getColumns()) {
+				newColMap.put(col.getName(), col);
+			}
+
+			java.util.Set<String> oldColNames = new java.util.HashSet<>();
+			for (ColumnInfo oldCol : this.tableInfo.getColumns()) {
+				oldColNames.add(oldCol.getName());
+				// 如果新结构中不存在该列，标记为已删除列
+				if (!newColMap.containsKey(oldCol.getName())) {
+					deletedColumns.add(oldCol);
+				}
+			}
+
+			for (ColumnInfo newCol : newInfo.getColumns()) {
+				// 如果旧结构中不存在，标记为新增列
+				if (!oldColNames.contains(newCol.getName())) {
+					addedColumnNames.add(newCol.getName());
+				}
+			}
+		}
+
 		this.tableInfo = newInfo;
-		// 同步更新卡片 title/description（与 forTable 构造时保持一致）
 		this.name = newInfo.getName();
 		this.description = newInfo.getComment();
-		// 重新计算高度（按列数）
-		int colCount = newInfo.getColumns() == null ? 0 : newInfo.getColumns().size();
+
+		// 重新计算高度（包含新增列和保留展示的已删除列）
+		int totalColCount = (newInfo.getColumns() == null ? 0 : newInfo.getColumns().size()) + deletedColumns.size();
 		double rowH = ROW_HEIGHT;
-		double bodyH = colCount * rowH;
-		// 上限 400（防止某些表字段过多时撑爆卡片）
+		double bodyH = totalColCount * rowH;
 		double h = Math.min(400.0, Math.max(50.0, headerHeight + bodyH + padding));
 		bounds.setRect(bounds.getX(), bounds.getY(), bounds.getWidth(), h);
+
+		// 如果有新增列，触发左侧划入动画
+		if (!addedColumnNames.isEmpty()) {
+			addedSlideProgress = 0.0f;
+			long startTime = System.currentTimeMillis();
+			int duration = 300; // 300ms 动画
+
+			slideAnimTimer = new javax.swing.Timer(16, e -> {
+				long elapsed = System.currentTimeMillis() - startTime;
+				float p = (float) elapsed / duration;
+				if (p >= 1.0f) {
+					p = 1.0f;
+					((javax.swing.Timer) e.getSource()).stop();
+				}
+				// ease-out 效果
+				addedSlideProgress = (float) (1.0 - Math.pow(1.0 - p, 2));
+				if (repaintCallback != null) {
+					repaintCallback.run();
+				}
+			});
+			slideAnimTimer.start();
+		} else {
+			addedSlideProgress = 1.0f;
+		}
+	}
+
+	/**
+	 * 替换卡片绑定的表元信息（用于普通场景/无动画回调）。
+	 *
+	 * @param newInfo 新的表元信息
+	 */
+	public void setTableInfo(TableInfo newInfo) {
+		setTableInfoWithDiff(newInfo, null);
 	}
 
 	/**
@@ -942,9 +1013,13 @@ public class KanbanCard {
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
 			// 行高亮背景（在分隔线之后画，覆盖在卡片背景上）
-			// 优先级：用户选中（橙色） > 搜索焦点行（深黄） > 搜索命中行（淡黄） > 连线占用（线色）> 普通
+			// 优先级：同步新增（浅绿） > 用户选中（橙色） > 搜索焦点行（深黄） > 搜索命中行（淡黄） > 连线占用（线色）> 普通
 			Color highlightColor = null;
-			if (highlightedRows.contains(i)) {
+			boolean isAdded = addedColumnNames.contains(col.getName());
+			if (isAdded) {
+				// 浅绿色背景代表新增列
+				highlightColor = isDark ? new Color(0x2E4A32) : new Color(0xD4EDDA);
+			} else if (highlightedRows.contains(i)) {
 				// 用户手动选中（橙色 #FE9933）
 				highlightColor = USER_HIGHLIGHT_COLOR;
 			} else if (searchMatchedRows.contains(i)) {
@@ -956,13 +1031,24 @@ public class KanbanCard {
 				// 连线占用（用连线自身的颜色）
 				highlightColor = linkedRows.get(i);
 			}
+
 			if (highlightColor != null) {
 				g2d.setColor(highlightColor);
-				g2d.fillRect(
-						(int) bounds.getX() + 1,
-						(int) rowTop + 1,
-						(int) bounds.getWidth() - 2,
-						rowHeight - 1);
+				if (isAdded && addedSlideProgress < 1.0f) {
+					// 新增列从左侧划入动画：clip 填充区域宽度为 width * addedSlideProgress
+					int fillW = (int) ((bounds.getWidth() - 2) * addedSlideProgress);
+					g2d.fillRect(
+							(int) bounds.getX() + 1,
+							(int) rowTop + 1,
+							fillW,
+							rowHeight - 1);
+				} else {
+					g2d.fillRect(
+							(int) bounds.getX() + 1,
+							(int) rowTop + 1,
+							(int) bounds.getWidth() - 2,
+							rowHeight - 1);
+				}
 			}
 
 			// 自适应文字颜色：行高亮为亮色时用深色文字，否则按主题默认色（深色主题白字，浅色主题黑字）
@@ -1012,6 +1098,67 @@ public class KanbanCard {
 							cmtX, textY);
 				}
 			}
+		}
+
+		// 渲染同步中被删除的列（浅红色背景 + 删除线/中划线）
+		for (int i = 0; i < deletedColumns.size() && (rowCount + i) < maxRows; i++) {
+			ColumnInfo delCol = deletedColumns.get(i);
+			double rowTop = bodyTop + (rowCount + i) * rowHeight;
+			double rowCenterY = rowTop + rowHeight / 2;
+			int textY = (int) (rowCenterY + colFm.getAscent() / 2 - 1);
+
+			// 分隔线
+			g2d.setColor(separatorColor);
+			g2d.drawLine((int) bounds.getX(), (int) rowTop,
+					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
+
+			// 浅红色背景
+			Color delBg = isDark ? new Color(0x4A2E2E) : new Color(0xF8D7DA);
+			g2d.setColor(delBg);
+			g2d.fillRect(
+					(int) bounds.getX() + 1,
+					(int) rowTop + 1,
+					(int) bounds.getWidth() - 2,
+					rowHeight - 1);
+
+			Color delTextColor = isDark ? new Color(0xE08080) : new Color(0x721C24);
+
+			int iconX = leftX;
+			int iconY = (int) (rowCenterY - 7);
+			Icon colIcon = resolveColumnIcon(delCol, isDark);
+			if (colIcon != null) {
+				colIcon.paintIcon(null, g2d, iconX, iconY);
+			}
+			int colTextX = iconX + 20;
+
+			g2d.setColor(delTextColor);
+			g2d.setFont(columnFont);
+			g2d.drawString(delCol.getName(), colTextX, textY);
+
+			int nameW = colFm.stringWidth(delCol.getName());
+			int colonX = colTextX + nameW;
+			g2d.drawString(" : ", colonX, textY);
+
+			int colonW = colFm.stringWidth(" : ");
+			int typeX = colonX + colonW;
+			g2d.drawString(delCol.getType(), typeX, textY);
+
+			int typeW = colFm.stringWidth(delCol.getType());
+
+			String comment = delCol.getComment();
+			if (comment != null && !comment.isEmpty()) {
+				int cmtX = typeX + typeW + 6;
+				int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
+				if (maxCmtW > 10) {
+					g2d.setFont(italicCommentFont);
+					String commentText = "/* " + comment + " */";
+					g2d.drawString(truncateByWidth(commentText, maxCmtW, italicFm), cmtX, textY);
+				}
+			}
+
+			// 画贯穿一整行的删除线（中划线）
+			g2d.setStroke(new BasicStroke(1.2f));
+			g2d.drawLine(leftX, (int) rowCenterY, (int) (bounds.getX() + bounds.getWidth() - padding), (int) rowCenterY);
 		}
 
 		// 列数过多提示
