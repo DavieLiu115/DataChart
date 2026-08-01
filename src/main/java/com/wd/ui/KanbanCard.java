@@ -313,6 +313,21 @@ public class KanbanCard {
 		return dark ? BG_DARK : BG_LIGHT;
 	}
 
+	/**
+	 * 用 YIQ 公式判断给定颜色是否为"亮色"（亮度 ≥ 128）。
+	 *
+	 * <p>用于行高亮时自适应选择文字颜色：背景亮 → 用深色文字；背景暗 → 用浅色文字。</p>
+	 */
+	public static boolean isLightColor(Color c) {
+		if (c == null) {
+			return false;
+		}
+		double brightness = (c.getRed() * 299
+				+ c.getGreen() * 587
+				+ c.getBlue() * 114) / 1000.0;
+		return brightness >= 128;
+	}
+
 	/** 是否表格模式（带有 TableInfo 元数据） */
 	public boolean isTableMode() {
 		return tableInfo != null;
@@ -888,6 +903,7 @@ public class KanbanCard {
 		// 颜色定义
 		Color columnNameColor = isDark ? COLUMN_NAME_COLOR_DARK : COLUMN_NAME_COLOR;
 		Color typeColor = isDark ? TYPE_COLOR_DARK : TYPE_COLOR;
+		Color colonColor = isDark ? new Color(0x888888) : new Color(0x999999);
 
 		for (int i = 0; i < rowCount; i++) {
 			ColumnInfo col = columns.get(i);
@@ -925,6 +941,14 @@ public class KanbanCard {
 						rowHeight - 1);
 			}
 
+			// 自适应文字颜色：行高亮为亮色时用深色文字，否则按主题默认色（深色主题白字，浅色主题黑字）
+			// 解决深色主题下，连线占用（浅蓝/粉色等亮色背景）白字看不清的问题
+			boolean adaptDarkText = highlightColor != null && isLightColor(highlightColor);
+			Color rowColumnNameColor = adaptDarkText ? new Color(0x222222) : columnNameColor;
+			Color rowTypeColor = adaptDarkText ? new Color(0x0E5A8E) : typeColor;
+			Color rowColonColor = adaptDarkText ? new Color(0x666666) : colonColor;
+			Color rowCommentColor = adaptDarkText ? new Color(0x555555) : commentColor;
+
 			// 1. 字段图标（按 主键/可空/索引 5 种组合）
 			int iconX = leftX;
 			int iconY = (int) (rowCenterY - 7);
@@ -934,19 +958,19 @@ public class KanbanCard {
 			}
 			int colTextX = iconX + 20; // 图标和列名间距加大
 
-			// 2. 列名（黑色）+ 冒号 + 类型（蓝色）
-			g2d.setColor(columnNameColor);
+			// 2. 列名 + 冒号 + 类型
+			g2d.setColor(rowColumnNameColor);
 			g2d.setFont(columnFont);
 			g2d.drawString(col.getName(), colTextX, textY);
 
 			int nameW = colFm.stringWidth(col.getName());
 			int colonX = colTextX + nameW;
-			g2d.setColor(isDark ? new Color(0x888888) : new Color(0x999999));
+			g2d.setColor(rowColonColor);
 			g2d.drawString(" : ", colonX, textY);
 
 			int colonW = colFm.stringWidth(" : ");
 			int typeX = colonX + colonW;
-			g2d.setColor(typeColor);
+			g2d.setColor(rowTypeColor);
 			g2d.drawString(col.getType(), typeX, textY);
 
 			int typeW = colFm.stringWidth(col.getType());
@@ -958,7 +982,7 @@ public class KanbanCard {
 				int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
 				if (maxCmtW > 10) {
 					g2d.setFont(italicCommentFont);
-					g2d.setColor(commentColor);
+					g2d.setColor(rowCommentColor);
 					String commentText = "/* " + comment + " */";
 					g2d.drawString(truncateByWidth(commentText, maxCmtW, italicFm),
 							cmtX, textY);

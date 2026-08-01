@@ -102,13 +102,29 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 #### 连线绘制
 - 默认线宽 `Connection.DEFAULT_STROKE_WIDTH = 2.4f`（从 1.6 加粗，便于辨识）
 - 选中连线时 `KanbanBoard.paintComponent` 临时把 `strokeWidth` 改成 2.5f 强调
-- 端点形状由 `RelationType` 决定：
-  - `ONE_TO_ONE` 两端单竖线（"1" 标识）
-  - `ONE_TO_MANY` 源端单竖线、目标端三叉（crow's foot）
-  - `MANY_TO_ONE` 反之
-  - `MANY_TO_MANY` 两端都三叉
-  - `UNKNOWN` 不画端点形状，保持简洁
+- **端点形状（2026-08-02 起简化）**：两端都画**开口椭圆**（不再区分 "1"/"多"），长轴竖直、短轴水平
+- `RelationType` 字段保留（持久化到 JSON），但目前不再影响渲染
 - 形状大小随线宽缩放（`Math.max(8.0, strokeWidth * 4.5)`），描边略细于线本身
+
+#### 水平引出线 + 贝塞尔曲线 + 开口椭圆（需求 19、20、21）
+- **问题（需求 19）**：之前直接从 `sourcePoint` 到 `targetPoint` 走 CubicCurve，当源/终点 Y 不对齐时，曲线进入/离开卡片处是斜的，鸟爪/竖线也跟着倾斜，看起来别扭
+- **问题（需求 20）**：需求 19 修复后，"1"端竖线虽然垂直了，但"多"端三叉还是斜的（因为连线方向是斜的），整体仍显歪斜
+- **问题（需求 21）**：椭圆有一半被卡片遮住，不够醒目
+- **方案**：
+  1. 在源/终点各加一段水平直线（"引出线"），中间用 CubicCurve 连接
+     - 引出线长度 `leadLen = clamp(|dx|/3, 24, 60)` 画板坐标
+     - `dirSign = sign(dx)` 支持右→左连线
+  2. 端点形状统一改为**开口椭圆**（不再区分 "1"/"多"）：
+     - 长轴垂直于连线方向 = 竖直方向（因为引出线始终水平）
+     - 短轴沿连线方向 = 水平方向
+  3. 椭圆尺寸 + 向外偏移（需求 21）：
+     - 长轴半长 `size * 0.8`（垂直），短轴半长 `size * 0.35`（水平）
+     - 椭圆中心向外偏移 `ELLIPSE_OFFSET = 6.0` 画板坐标
+       - 起点（sourcePoint 在源卡右边）→ 向右偏移
+       - 终点（targetPoint 在目标卡左边）→ 向左偏移
+       - 偏移方向与连接方向无关（几何位置决定"外侧"）
+- **常量**：`Connection.LEAD_MIN = 24.0`、`LEAD_MAX = 60.0`、`ELLIPSE_OFFSET = 6.0`
+- **取舍**：放弃区分 "1"/"多" 的 ER 标注，改为两端同形，整体更简洁
 
 #### 起点背景色同步整条连线（需求 1）
 - `Connection.resolveLineColor()` 优先用 `source.getHighlightedColorForRow(sourceRow)`，没有再用 palette 颜色
@@ -124,6 +140,14 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - `KanbanCard.activeRowColors`：每帧重绘前由 `KanbanBoard` 写入
 - `getHighlightedColorForRow()` 优先级：用户选中 > 临时激活色 > 连线占用色
 - 用途：让连线的 `source.getHighlightedColorForRow()` 能感知"激活列"颜色
+
+#### 行高亮背景下的文字色自适应（需求 22）
+- **问题**：深色主题下，行高亮背景色是**亮色**（连线占用的浅蓝/粉色 `#A8C5E7`，搜索命中的淡黄 `#FFF3B0`、深黄 `#FFD24A`，用户选中的橙色 `#FE9933`），但文字仍用主题默认色（深色主题 = 白色），导致**白字浅背景看不清**
+- **方案**：`KanbanCard.drawTableCard` 在行循环里用 `isLightColor(highlightColor)` 判断背景亮度：
+  - 亮背景（YIQ ≥ 128）→ 文字用深色：`#222222`（列名）/ `#0E5A8E`（类型）/ `#666666`（冒号）/ `#555555`（注释）
+  - 暗背景/无高亮 → 维持主题默认色（深色主题白字，浅色主题黑字）
+- **新增 API**：`KanbanCard.isLightColor(Color)`（静态，YIQ 公式，与 `BoardExportUtil.isDarkTheme` 反义）
+- **影响范围**：仅表格卡片 `drawTableCard` 的列名/类型/冒号/注释；图标颜色不变；表头/卡片标题/边框不受影响
 
 #### 复制到剪贴板（需求 3、4）
 - 使用 `java.awt.Toolkit.getDefaultToolkit().getSystemClipboard()` + `StringSelection`

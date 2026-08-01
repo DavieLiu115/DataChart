@@ -5,6 +5,7 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Graphics2D;
 import java.awt.geom.CubicCurve2D;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 
@@ -17,6 +18,14 @@ public class Connection {
 
 	/** 默认线宽（从 1.6 调到 2.4，更明显） */
 	private static final float DEFAULT_STROKE_WIDTH = 2.4f;
+
+	/** 起点/终点水平引出线长度下限（画板坐标，px） */
+	private static final double LEAD_MIN = 24.0;
+	/** 起点/终点水平引出线长度上限（画板坐标，px） */
+	private static final double LEAD_MAX = 60.0;
+
+	/** 端点椭圆中心向外偏移距离（画板坐标，px），让椭圆大部分露在卡片外，更醒目 */
+	private static final double ELLIPSE_OFFSET = 6.0;
 
 	private final KanbanCard source;
 	private final int sourceRow;
@@ -113,107 +122,85 @@ public class Connection {
 		g2d.setColor(lineColor);
 		g2d.setStroke(new BasicStroke(strokeWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
-		double dx = Math.abs(targetPoint.getX() - sourcePoint.getX());
-		double ctrlX1 = sourcePoint.getX() + dx / 2.0;
-		double ctrlY1 = sourcePoint.getY();
-		double ctrlX2 = targetPoint.getX() - dx / 2.0;
-		double ctrlY2 = targetPoint.getY();
+		// 计算起点/终点的水平引出线长度：
+		// 引出线（始终水平）让连线在靠近卡片时是直的，再进入贝塞尔曲线过渡，视觉上更顺。
+		double dx = targetPoint.getX() - sourcePoint.getX();
+		// 取总水平距离的 1/3，最少 LEAD_MIN，最多 LEAD_MAX
+		double leadLen = Math.max(LEAD_MIN, Math.min(LEAD_MAX, Math.abs(dx) / 3.0));
+		// 终点在起点左侧（dx<0）时，引出线方向反转
+		double dirSign = dx >= 0 ? 1.0 : -1.0;
+
+		// 起点侧引出线终点（从源卡向右/左走 leadLen，保持水平）
+		double leadStartX = sourcePoint.getX() + dirSign * leadLen;
+		double leadStartY = sourcePoint.getY();
+		// 终点侧引出线起点（从目标卡向左/右走 leadLen，保持水平）
+		double leadEndX = targetPoint.getX() - dirSign * leadLen;
+		double leadEndY = targetPoint.getY();
+
+		// 1. 起点水平引出线
+		g2d.draw(new Line2D.Double(sourcePoint.getX(), sourcePoint.getY(),
+				leadStartX, leadStartY));
+
+		// 2. 终点水平引出线（留到画完曲线后再画，避免与曲线交叠）
+		// 3. 中间的贝塞尔曲线：起点用 leadStart（水平），终点用 leadEnd（水平）
+		//    控制点的 X = 中点附近，Y 与各自端点 Y 相同 → 让曲线两端水平进入/水平离开
+		double ctrlX1 = leadStartX + (leadEndX - leadStartX) / 2.0;
+		double ctrlY1 = leadStartY;
+		double ctrlX2 = leadEndX - (leadEndX - leadStartX) / 2.0;
+		double ctrlY2 = leadEndY;
 
 		g2d.draw(new CubicCurve2D.Double(
-				sourcePoint.getX(), sourcePoint.getY(),
+				leadStartX, leadStartY,
 				ctrlX1, ctrlY1,
 				ctrlX2, ctrlY2,
+				leadEndX, leadEndY));
+
+		// 4. 终点水平引出线（接曲线 → 终点）
+		g2d.draw(new Line2D.Double(leadEndX, leadEndY,
 				targetPoint.getX(), targetPoint.getY()));
 
-		// 在源/目标端点处根据 relationType 绘制形状（鸟爪/竖线等），用与线相同的颜色
-		drawEndpointShape(g2d, sourcePoint, targetPoint, true, lineColor);
-		drawEndpointShape(g2d, targetPoint, sourcePoint, false, lineColor);
+		// 在源/目标端点处画开口椭圆（关系端点标识），用与线相同的颜色
+		// 由于端点前一段是水平的，椭圆长轴 = 竖直方向，与连线方向垂直
+		// 椭圆中心向外偏移 = 远离卡片：sourcePoint 在源卡右边 → 向右偏移；targetPoint 在目标卡左边 → 向左偏移
+		// 偏移方向与连接方向无关（源/目标点的几何位置就决定"外侧"）
+		drawEndpointShape(g2d, sourcePoint, +1, lineColor);
+		drawEndpointShape(g2d, targetPoint, -1, lineColor);
 	}
 
 	/**
-	 * 在端点处根据 relationType 绘制小形状，标识关系类型
+	 * 在端点处绘制一个开口椭圆（"环"/"眼"形状），用于标识关系端点。
 	 *
-	 * <p>ER 图常用约定：</p>
+	 * <p>形状说明：</p>
 	 * <ul>
-	 *   <li>ONE_TO_ONE  → 两端单竖线（"1"）</li>
-	 *   <li>ONE_TO_MANY → "1" 端单竖线，"多" 端分叉（crow's foot）</li>
-	 *   <li>MANY_TO_ONE → "多" 端分叉，"1" 端单竖线</li>
-	 *   <li>MANY_TO_MANY → 两端都分叉</li>
+	 *   <li>椭圆中心在端点处，**长轴垂直于连线方向，短轴沿连线方向**</li>
+	 *   <li>由于上一节已保证端点前的引出线始终是水平的，因此椭圆长轴 = 竖直方向</li>
+	 *   <li>两端使用相同形状（不再区分 "1" / "多"），视觉更简洁一致</li>
+	 *   <li>为让端点标识更醒目，椭圆整体**向外（远离卡片）偏移 ELLIPSE_OFFSET**，避免一半被卡片遮挡</li>
 	 * </ul>
 	 *
-	 * <p>约定：源卡片 = "1" 侧，目标卡片 = "多" 侧（用户也可以从右到左连，因此根据 type 而非方向判断）。</p>
-	 *
-	 * @param shapeColor 形状颜色（通常与线色一致）
+	 * @param shapeColor 形状颜色（与线色一致）
 	 */
-	private void drawEndpointShape(Graphics2D g2d, Point2D endpoint, Point2D otherEnd,
-			boolean isSource, Color shapeColor) {
-		// 决定本端是"1"端还是"多"端
-		boolean isOneSide;
-		switch (relationType) {
-			case ONE_TO_ONE:
-				isOneSide = true;
-				break;
-			case ONE_TO_MANY:
-				isOneSide = isSource;
-				break;
-			case MANY_TO_ONE:
-				isOneSide = !isSource;
-				break;
-			case MANY_TO_MANY:
-				isOneSide = false;
-				break;
-			default:
-				// UNKNOWN：不画端点形状，保持简洁
-				return;
-		}
-
-		// 沿连线方向（指向对方）
-		double dirX = otherEnd.getX() - endpoint.getX();
-		double dirY = otherEnd.getY() - endpoint.getY();
-		double len = Math.hypot(dirX, dirY);
-		if (len < 1e-3) {
-			return;
-		}
-		double ux = dirX / len;
-		double uy = dirY / len;
-		// 法线（垂直于连线）
-		double nx = -uy;
-		double ny = ux;
-
-		// 形状大小（随线宽缩放）
+	private void drawEndpointShape(Graphics2D g2d, Point2D endpoint, double dirSign, Color shapeColor) {
 		double size = Math.max(8.0, strokeWidth * 4.5);
+		// 椭圆长轴（垂直）= size * 1.6，短轴（水平，沿线）= size * 0.7
+		double halfMajor = size * 0.8;
+		double halfMinor = size * 0.35;
+		// 椭圆中心向"远离卡片"方向偏移 ELLIPSE_OFFSET，避免一半被卡片遮挡
+		double offsetX = dirSign * ELLIPSE_OFFSET;
 
-		// 备份当前 stroke，画端点形状时用细一点的描边
+		// 备份当前 stroke，画椭圆时用细一点的描边，让环看起来更精致
 		java.awt.Stroke oldStroke = g2d.getStroke();
 		g2d.setColor(shapeColor);
 		g2d.setStroke(new BasicStroke(Math.max(1.2f, strokeWidth * 0.85f),
 				BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 
-		if (isOneSide) {
-			// 单竖线（"1" 端）：在与连线垂直方向画一条短线
-			double x1 = endpoint.getX() + nx * size;
-			double y1 = endpoint.getY() + ny * size;
-			double x2 = endpoint.getX() - nx * size;
-			double y2 = endpoint.getY() - ny * size;
-			g2d.draw(new Line2D.Double(x1, y1, x2, y2));
-		} else {
-			// "多" 端：crow's foot（三叉），中间一根沿连线方向，两侧各 45°
-			// 端点稍向内缩，避免遮挡卡片
-			double bx = endpoint.getX() + ux * (size * 0.15);
-			double by = endpoint.getY() + uy * (size * 0.15);
-			// 中间一支（沿连线指向对方）
-			double mx = bx + ux * size;
-			double my = by + uy * size;
-			g2d.draw(new Line2D.Double(bx, by, mx, my));
-			// 左支
-			double lx = bx + ux * size * 0.6 + nx * size * 0.8;
-			double ly = by + uy * size * 0.6 + ny * size * 0.8;
-			g2d.draw(new Line2D.Double(bx, by, lx, ly));
-			// 右支
-			double rx = bx + ux * size * 0.6 - nx * size * 0.8;
-			double ry = by + uy * size * 0.6 - ny * size * 0.8;
-			g2d.draw(new Line2D.Double(bx, by, rx, ry));
-		}
+		// 椭圆：以端点向外偏移后为中心，长轴竖直（y 方向），短轴水平（x 方向）
+		// Ellipse2D 的 x/y 是左上角坐标，width/height 是宽/高
+		g2d.draw(new Ellipse2D.Double(
+				endpoint.getX() + offsetX - halfMinor,
+				endpoint.getY() - halfMajor,
+				halfMinor * 2.0,
+				halfMajor * 2.0));
 
 		g2d.setStroke(oldStroke);
 	}
