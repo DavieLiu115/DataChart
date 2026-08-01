@@ -173,6 +173,12 @@ public class KanbanBoard extends JPanel {
 	/** 看板内容变更监听器 */
 	private Runnable changeListener;
 
+	/**
+	 * 视图变化监听器：zoom / pan / reset / focusView 之后触发，
+	 * 用于通知上层更新 zoom 百分比显示等
+	 */
+	private Runnable viewChangeListener;
+
 	/** 保存动作（Command+S / Ctrl+S 触发） */
 	private Runnable saveAction;
 
@@ -235,6 +241,22 @@ public class KanbanBoard extends JPanel {
 	 */
 	public void setChangeListener(Runnable listener) {
 		this.changeListener = listener;
+	}
+
+	/**
+	 * 注册视图变化监听器：zoom / pan / reset / focusView 之后触发
+	 */
+	public void setViewChangeListener(Runnable listener) {
+		this.viewChangeListener = listener;
+	}
+
+	/**
+	 * 通知视图变化
+	 */
+	private void notifyViewChanged() {
+		if (viewChangeListener != null) {
+			viewChangeListener.run();
+		}
 	}
 
 	/**
@@ -421,13 +443,14 @@ public class KanbanBoard extends JPanel {
 						ex.printStackTrace();
 					}
 				} else if (isDraggingBoard) {
-					// 平移画板
-					double dx = e.getX() - lastPoint.getX();
-					double dy = e.getY() - lastPoint.getY();
-					transform.translate(dx / zoomFactor, dy / zoomFactor);
-					lastPoint = e.getPoint();
-					repaint();
-				}
+				// 平移画板
+				double dx = e.getX() - lastPoint.getX();
+				double dy = e.getY() - lastPoint.getY();
+				transform.translate(dx / zoomFactor, dy / zoomFactor);
+				lastPoint = e.getPoint();
+				notifyViewChanged();
+				repaint();
+			}
 			}
 
 			@Override
@@ -854,6 +877,7 @@ public class KanbanBoard extends JPanel {
 
 		// 除以 zoomFactor，保证缩放后移动量跟手
 		transform.translate(deltaX / zoomFactor, deltaY / zoomFactor);
+		notifyViewChanged();
 		repaint();
 	}
 
@@ -942,11 +966,12 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 复位视图（位置 + 缩放）
+	 * 复位视图（位置 + 缩放 = 回到 100% 且居中无偏移）
 	 */
 	public void resetView() {
 		transform = new AffineTransform();
 		zoomFactor = 1.0;
+		notifyViewChanged();
 		repaint();
 	}
 
@@ -966,6 +991,61 @@ public class KanbanBoard extends JPanel {
 		transform.scale(scaleFactor, scaleFactor);
 		transform.translate(-p.getX(), -p.getY());
 		transform.concatenate(old);
+		notifyViewChanged();
+		repaint();
+	}
+
+	/**
+	 * 把所有卡片整体居中到视口中心，**保留当前缩放倍率**
+	 *
+	 * <p>使用场景：用户通过拖拽 / 滚轮把视图移到视口外后，希望一键回到"画板内容居中"，
+	 * 但又不想改变当前缩放。计算所有卡片 bounds 的合并矩形，让其中心落到视口中心。</p>
+	 *
+	 * <p>无卡片时不改变视图（避免空视图被乱调）。</p>
+	 */
+	public void focusView() {
+		if (cards.isEmpty()) {
+			return;
+		}
+		// 1. 计算所有卡片的合并包围盒（画板坐标）
+		double minX = Double.POSITIVE_INFINITY;
+		double minY = Double.POSITIVE_INFINITY;
+		double maxX = Double.NEGATIVE_INFINITY;
+		double maxY = Double.NEGATIVE_INFINITY;
+		for (KanbanCard card : cards) {
+			Rectangle2D b = card.getBounds();
+			if (b.getX() < minX) {
+				minX = b.getX();
+			}
+			if (b.getY() < minY) {
+				minY = b.getY();
+			}
+			if (b.getX() + b.getWidth() > maxX) {
+				maxX = b.getX() + b.getWidth();
+			}
+			if (b.getY() + b.getHeight() > maxY) {
+				maxY = b.getY() + b.getHeight();
+			}
+		}
+		double contentCenterX = (minX + maxX) / 2.0;
+		double contentCenterY = (minY + maxY) / 2.0;
+
+		// 2. 视口中心（屏幕坐标）
+		java.awt.Rectangle view = getVisibleRect();
+		double viewCenterX = view.getX() + view.getWidth() / 2.0;
+		double viewCenterY = view.getY() + view.getHeight() / 2.0;
+
+		// 3. 当前 contentCenter 在屏幕上的位置
+		//    screenX = contentX * zoomFactor + translateX
+		double currentScreenX = contentCenterX * zoomFactor + transform.getTranslateX();
+		double currentScreenY = contentCenterY * zoomFactor + transform.getTranslateY();
+
+		// 4. 反推 translate，让 contentCenter 落到 viewCenter
+		double dx = viewCenterX - currentScreenX;
+		double dy = viewCenterY - currentScreenY;
+		transform.translate(dx / zoomFactor, dy / zoomFactor);
+
+		notifyViewChanged();
 		repaint();
 	}
 

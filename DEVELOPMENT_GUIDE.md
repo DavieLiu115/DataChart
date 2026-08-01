@@ -156,7 +156,40 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - 关联列高亮 `RELATED_ROW_COLOR = #FD9933` 在两套主题下都能看清，不需要切换
 - 复制菜单的 `setEnabled` 处理空注释情况，避免用户点了无效果
 
-### 16. 搜索功能（DataChartView + KanbanBoard）
+### 16. 视图工具栏（Focus / FullScreen / Zoom 显示）
+
+#### Focus 按钮（focusButton）
+- 位置：工具栏第 2 列（紧跟搜索框），图标用 `PluginIcons.reset`（"复位/居中"视觉语义）
+- 点击 → `KanbanBoard.focusView()`：**保留当前 zoom**，计算所有卡片 bounds 合并矩形的中心，平移 transform 让其落到视口中心
+- 与 `resetView()` 的区别：reset 是 zoom=100% + transform 清零（完全重置）；focus 是"画板内容回到视口"，zoom 不变
+- 无卡片时不改变视图
+
+#### FullScreen 按钮（fullScreamButton）
+- 位置：工具栏第 3 列（在 Focus 之后）
+- 状态切换（`toggleFullScreen()`）：
+  - **进入全屏**：隐藏 `searchTextField / focusButton / exportPDFButton / exportPictureButton / zoomPercentLabel`，只保留 fullScreamButton
+  - 按钮 icon 从 `PluginIcons.fullScream` 换成 `PluginIcons.exit_fullScream`，文字 "FullScream" → "ExitFullScream"，tooltip 翻转
+  - **退出全屏**：恢复所有被隐藏组件，按钮 icon/text/tooltip 恢复初始
+- 用 `hiddenOnFullScreen: List<Component>` 记录被隐藏的组件，退出时批量恢复
+- 调用 `rootPanel.revalidate()` + `repaint()` 触发重排
+
+#### Zoom 百分比显示
+- `zoomPercentLabel` 始终从 `KanbanBoard.getZoomFactor()` 实时读取，`(int) Math.round(zoomFactor * 100) + "%"`
+- 引入 `KanbanBoard.viewChangeListener: Runnable`，在以下时机触发：
+  - `zoom()` 缩放
+  - `panByWheel()` 滚轮平移
+  - `mouseDragged` 画板拖拽平移
+  - `resetView()` 完全复位
+  - `focusView()` 聚焦
+  - `scrollToFocusResult()` 搜索结果滚动（已存在）
+- DataChartView 注册 `viewChangeListener → updateSearchStatusLabel`，每次触发都重算 zoom 文本
+
+#### 设计原则
+- **focusView 不改 zoom**：只调 transform，缩放倍率是用户工作状态，不应该被聚焦动作破坏
+- **fullscreen 用 setVisible(false)**：比 CardLayout / 换 rootPanel 简单，不影响数据模型
+- **zoom 实时刷新**：viewChangeListener 统一驱动，避免在每个 zoom 入口散落更新调用
+
+### 17. 搜索功能（DataChartView + KanbanBoard）
 - **入口**：`DataChartView` 顶部工具栏的 `SearchTextField`，回车触发 `doSearch()` → `kanbanBoard.search(keyword)`
 - **搜索范围**：遍历 `cards`，对每张卡片检查 表名、表注释（= `description`）、列名、列注释，**不区分大小写**子串匹配
 - **结果表示**：`KanbanBoard.SearchResult(cardId, rowIndex)` 列表；`rowIndex = -1` 表示表头命中，否则是列索引

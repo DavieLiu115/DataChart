@@ -32,7 +32,7 @@ public class DataChartView extends DialogWrapper {
 	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
 	private JPanel dataView;
-	private JButton autoLayoutButton;
+	private JButton focusButton;
 	private KanbanBoard kanbanBoard;
 	private Project project;
 
@@ -42,6 +42,12 @@ public class DataChartView extends DialogWrapper {
 	/** 保存回调（Command+S 时触发，由 DataChartEditor 注册） */
 	private Runnable saveListener;
 
+	/** 是否处于全屏模式 */
+	private boolean isFullScreen = false;
+
+	/** 退出全屏时需要恢复显示的工具栏组件引用 */
+	private final java.util.List<java.awt.Component> hiddenOnFullScreen = new java.util.ArrayList<>();
+
 	public DataChartView(@Nullable Project project) {
 		super(project);
 		this.project = project;
@@ -49,11 +55,99 @@ public class DataChartView extends DialogWrapper {
 		setupHeaderTool();
 		setupSearchField();
 		initKanbanBoard();
+		setupToolBarButtons();
 
 		fullScreamButton.setIcon(PluginIcons.fullScream);
 		exportPDFButton.setIcon(PluginIcons.export);
 		exportPictureButton.setIcon(PluginIcons.image);
-		autoLayoutButton.setIcon(PluginIcons.autoLayout);
+		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
+		focusButton.setIcon(PluginIcons.reset);
+		focusButton.setText("Focus");
+		// 初次构造后立即刷新一次 zoom 显示（100%）
+		updateSearchStatusLabel();
+	}
+
+	/**
+	 * 给工具栏按钮挂监听
+	 */
+	private void setupToolBarButtons() {
+		if (focusButton != null) {
+			focusButton.setToolTipText("聚焦画板（保留缩放，居中显示）");
+			focusButton.addActionListener(e -> {
+				if (kanbanBoard != null) {
+					kanbanBoard.focusView();
+				}
+			});
+		}
+		if (fullScreamButton != null) {
+			fullScreamButton.setToolTipText("进入全屏模式");
+			fullScreamButton.addActionListener(e -> toggleFullScreen());
+		}
+	}
+
+	/**
+	 * 切换全屏模式
+	 *
+	 * <p>全屏时隐藏 headerTool 内的搜索框 + AutoLayout/Focus/Export 按钮，
+	 * 只保留 FullScream 按钮（按钮文案变 ExitFullScream，图标换 exit_fullScream），
+	 * 让 dataView 撑满整个 rootPanel。</p>
+	 */
+	private void toggleFullScreen() {
+		if (headerTool == null) {
+			return;
+		}
+		isFullScreen = !isFullScreen;
+		if (isFullScreen) {
+			enterFullScreen();
+		} else {
+			exitFullScreen();
+		}
+		// 重绘以让 dataView 重新布局
+		if (rootPanel != null) {
+			rootPanel.revalidate();
+			rootPanel.repaint();
+		}
+	}
+
+	/**
+	 * 进入全屏：隐藏非 FullScream 按钮 + 搜索框，记录到 hiddenOnFullScreen 便于恢复
+	 */
+	private void enterFullScreen() {
+		hiddenOnFullScreen.clear();
+		// 仅保留 fullScreamButton 在工具栏可见，其他组件 hidden
+		java.awt.Component[] toHide = new java.awt.Component[]{
+				searchTextField, focusButton, exportPDFButton, exportPictureButton
+		};
+		for (java.awt.Component c : toHide) {
+			if (c != null && c.isVisible()) {
+				c.setVisible(false);
+				hiddenOnFullScreen.add(c);
+			}
+		}
+		// 隐藏 zoomPercentLabel 也不太合理（用户期望全屏后还能看到 zoom），但为了"工具栏只留退出按钮"也隐藏
+		if (zoomPercentLabel != null && zoomPercentLabel.isVisible()) {
+			zoomPercentLabel.setVisible(false);
+			hiddenOnFullScreen.add(zoomPercentLabel);
+		}
+		// 切换按钮外观：图标 + 文字
+		fullScreamButton.setIcon(PluginIcons.exit_fullScream);
+		fullScreamButton.setText("ExitFullScream");
+		fullScreamButton.setToolTipText("退出全屏");
+	}
+
+	/**
+	 * 退出全屏：恢复所有被隐藏的组件
+	 */
+	private void exitFullScreen() {
+		for (java.awt.Component c : hiddenOnFullScreen) {
+			if (c != null) {
+				c.setVisible(true);
+			}
+		}
+		hiddenOnFullScreen.clear();
+		fullScreamButton.setIcon(PluginIcons.fullScream);
+		fullScreamButton.setText("FullScream");
+		fullScreamButton.setToolTipText("进入全屏模式");
 	}
 
 	/**
@@ -72,6 +166,8 @@ public class DataChartView extends DialogWrapper {
 				boardChangeListener.run();
 			}
 		});
+		// 视图变化（zoom/pan/reset/focusView）时刷新 zoom 百分比显示
+		kanbanBoard.setViewChangeListener(this::updateSearchStatusLabel);
 		// Command+S / Ctrl+S 保存
 		kanbanBoard.registerSaveAction(() -> {
 			if (saveListener != null) {
@@ -208,40 +304,48 @@ public class DataChartView extends DialogWrapper {
 	}
 
 	/**
-	 * 更新缩放百分比标签旁的搜索状态（复用 zoomPercentLabel 区域右侧）
+	 * 刷新缩放百分比 + 搜索状态标签
 	 *
-	 * <p>格式：100% | 3/12
-	 * 有结果时显示 "当前/总数"，无结果时恢复为纯百分比。
-	 * 注意：复用 zoomPercentLabel 不新增组件，避免改动 .form 布局。</p>
+	 * <p>格式：150% | 3/12（150% 是当前 zoom 倍率，后面是搜索结果当前/总数）
+	 * 无搜索结果时只显示 zoom 百分比。</p>
+	 *
+	 * <p>由以下时机调用：</p>
+	 * <ul>
+	 *   <li>KanbanBoard 视图变化（zoom/pan/reset/focusView）时通过 viewChangeListener</li>
+	 *   <li>搜索结果变化时（doSearch / 上下键 / ESC / 加载文件）</li>
+	 *   <li>初次构造后</li>
+	 * </ul>
 	 */
 	private void updateSearchStatusLabel() {
-		if (zoomPercentLabel == null || kanbanBoard == null) {
+		if (zoomPercentLabel == null) {
+			return;
+		}
+		String zoomText = getZoomPercentText();
+		if (kanbanBoard == null) {
+			zoomPercentLabel.setText(zoomText);
 			return;
 		}
 		int total = kanbanBoard.getSearchResultCount();
 		if (total == 0) {
-			// 恢复纯百分比显示
-			zoomPercentLabel.setText(getZoomPercentText());
+			zoomPercentLabel.setText(zoomText);
 			return;
 		}
 		int current = kanbanBoard.getSearchFocusIndex() + 1;
-		zoomPercentLabel.setText(getZoomPercentText() + "  |  " + current + "/" + total);
+		zoomPercentLabel.setText(zoomText + "  |  " + current + "/" + total);
 	}
 
 	/**
-	 * 获取缩放百分比文本（去掉后面拼接的搜索状态部分）
+	 * 获取"纯"缩放百分比文本（取自 {@link KanbanBoard#getZoomFactor()}，整数化）
+	 *
+	 * <p>实现：每次都从 kanbanBoard 实时读取 zoomFactor，不再依赖 zoomPercentLabel 的旧值。
+	 * 这样 zoom/pan/focus 任何时候都会反映最新值。</p>
 	 */
 	private String getZoomPercentText() {
-		String text = zoomPercentLabel.getText();
-		if (text == null || text.isEmpty()) {
+		if (kanbanBoard == null) {
 			return "100%";
 		}
-		// 若已包含 "  |  " 状态，去掉之后的部分
-		int idx = text.indexOf("  |  ");
-		if (idx > 0) {
-			return text.substring(0, idx);
-		}
-		return text;
+		int percent = (int) Math.round(kanbanBoard.getZoomFactor() * 100);
+		return percent + "%";
 	}
 
 	@Override
