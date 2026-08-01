@@ -213,10 +213,11 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - `baseFileName` 来自 `DataChartEditor.resolveBaseFileName()`（`file.getNameWithoutExtension()`），注入到 `DataChartView.setBaseFileName(name)`
   - 未注入时 fallback 为 "datachart"
 - **核心 API**（KanbanBoard）：
-  - `calculateTotalBounds()`：所有 cards 合并包围盒 + 40px padding（防止阴影被裁切）；无 cards 时返回画板大小
+  - `calculateTotalBounds()`：所有 cards 合并包围盒 + 4px padding（**2026-08-01 从 40 减小到 4**，原 40 padding 让导出图四周留白过大；4 像素够容纳阴影偏移 +2 且不裁切）；无 cards 时返回画板大小
   - `paintForExport(Graphics2D, Rectangle2D, boolean dark)`：导出共用的绘制方法，画背景 + 网格 + 连线 + 卡片；不画屏幕坐标的对齐辅助线 / tooltip / 鼠标连线预览
   - `exportToPdf(File)`：用 iText 5.5.13 + iText Asian，中文用 `STSong-Light (UniGB-UCS2-H)`，回退到 Windows `simsun.ttc`；PDF 页面大小 = exportArea 的 width/height
   - `exportToImage(File, String format, double scale)`：JPG 用 `JPEGImageWriteParam` 高质量压缩 0.95f；PNG 用 `TYPE_INT_ARGB`；超内存自动降级 scale（参考 DataHelper 内存管理）
+  - **对称 padding 围绕内容中心**：`calculateTotalBounds` 用 `(centerX - halfW, centerY - halfH, 2*halfW, 2*halfH)`，让 exportArea 中心 = 卡片合并中心，padding 四面对称（各 4 像素），不再受 cards 位置不对称影响
 - **通知**：成功后用 `Notifications.Bus.notify(Notification("DataChart", ...))` 弹系统通知，失败给 Error 通知
 - **空画板**：cards.isEmpty() 时直接给 "画板为空，无内容可导出" 通知，不弹文件框
 - **iText 字体映射器**：`DefaultFontMapper` 的 `awtToPdf` 自定义返回 `BaseFont`（中文 STSong → simsun → 默认）
@@ -240,5 +241,71 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - **根因**：原 `Rectangle(minX-40, minY-40, w+80, h+80)` 上下对称但**左右不对称**（如果 minX 不在 0）
   - **修复**：以"卡片合并中心"为锚点，加对称 padding：`center ± (extent/2 + padding)`
   - 实际画板坐标值与旧 `minX-40` 相同，但语义清晰：四面对称 padding
-- **API 重载**：`paintForExport(g2d, area, dark)` 重载为 `paintForExport(g2d, area, dark, scale)`，scale=1.0 保持原行为
+- **API 重载**：`paintForExport(g2d, area, dark)` 重载为 `paintForExport(g2d, area, dark, scale, deviceW, deviceH)`，scale=1.0 保持原行为
 - **PDF 不传 scale**：PDF 是矢量，scale 始终 1.0，由 `document` 的 `Rectangle(width, height)` 决定尺寸
+- **导出时先清屏再 transform**（2026-08-01 重构）：fillRect/clearRect 双保险用设备坐标 (0, 0) 完整覆盖整个目标区域，再 apply transform。避免之前"transform 链 + fillRect"数学上对但实际有黑色透出的问题
+- **Debug log**：`exportToImage` / `exportToPdf` 用 `LOG.warn("[DataChart export] ...")` 输出 exportArea 实际值 + cards bounds + scale，方便用户重启 IDE 后看 log 诊断问题
+
+### 19. 工具类抽取（2026-08-01 重构 KanbanBoard）
+为降低 `KanbanBoard`（原 ~2368 行）的复杂度，把职责单一的方法抽取为独立工具类：
+
+#### BoardExportUtil（导出工具类，`com.wd.ui.BoardExportUtil`）
+- **静态方法**（无需实例化，私有构造）：
+  - `calculateTotalBounds(List<KanbanCard>)`：包围盒计算（原来依赖 `cards`，抽成静态后传 `cards` 即可）
+  - `isDarkTheme(Color background)`：YIQ 亮度判断（原为 KanbanBoard 私有方法）
+  - `exportToPdf(KanbanBoard, File)` / `exportToImage(KanbanBoard, File, format, scale)`：文件 I/O + 尺寸计算 + 内存管理 + 图像编码
+- **绘制入口留在 KanbanBoard**：`paintForExport(...)` 因依赖大量内部状态（`computeLinkedRows` / `refreshRelatedRows` / `activeHighlightCard` / `relatedRowKeys` / `parseRelatedKeyById` / `drawGrid`），改为**包级可见**（去掉 `public`），由工具类调用。
+- **调用方式**：`BoardExportUtil.exportToPdf(kanbanBoard, file)`，不再是 `kanbanBoard.exportToPdf(file)`。
+- **抽取原则**：把"纯 I/O + 计算"（与看板状态无关的部分）尽量静态化到工具类；把"强耦合看板状态"的绘制逻辑留在原类但暴露包级入口，避免为了抽取而破坏封装。
+
+#### NotificationUtil（提醒工具类，`com.wd.ui.NotificationUtil`）
+- **静态方法**（私有构造）：
+  - `info(title, content)` / `error(title, content)`：封装 `Notifications.Bus`（从 DataChartView 抽取，通知组 ID 统一 `"DataChart"`）
+  - `confirmYesNo(project, title, message, yesText, noText)`：封装 `Messages.showYesNoDialog`（从 KanbanBoard 的删除确认抽取）
+- **设计原则**：所有提醒入口统一走工具类，避免 `Notification`/`Messages` 调用散落在各处；后续要改通知样式只需改工具类一处。
+
+#### 注意事项
+- `KanbanBoard.isDarkTheme()` 仍保留为私有，但内部委托给 `BoardExportUtil.isDarkTheme(getBackground())`，避免亮度判断逻辑重复。
+- `calculateTotalBounds()` 在 KanbanBoard 保留薄壳（委托给 util），兼容内部 `focusView` 等调用，避免破坏现有逻辑。
+
+### 20. KanbanBoard 二次拆分（2026-08-01，文件过大 → 按职责拆分）
+第 19 节已抽出导出/提醒工具类，但 `KanbanBoard` 仍约 2150 行。再次按**逻辑内聚 + 低耦合**拆出 5 个类（KanbanBoard 降到约 1400 行）：
+
+#### BoardViewport（视口几何，`com.wd.ui.BoardViewport`，实例类）
+- **持有**：`transform`（AffineTransform）+ `zoomFactor`（double）
+- **方法**：`reset()` / `zoom(p, scale)` / `panByWheel(e, rot)` / `pan(dx, dy)` / `focusOn(cards, w, h)` / `centerOn(bx, by, w, h)` / `transformPoint(p)` / `getInverse()` / `getTransform()` / `getZoomFactor()`
+- **坐标约定**：`screen = board * zoomFactor + translate`；`transformPoint` 用逆矩阵屏幕→画板
+- **边界**：`MIN_ZOOM=0.1` / `MAX_ZOOM=10`；`focusOn`/`centerOn` 保留 zoom 只改 translate
+- **KanbanBoard 职责**：只做 `viewport.xxx()` + `notifyViewChanged()` + `repaint()` 的编排
+
+#### BoardSnapHelper（磁吸对齐，`com.wd.ui.BoardSnapHelper`，静态工具）
+- **纯计算**：`compute(moving, all, zoomFactor, translateX, translateY, panelW, panelH)` → `SnapResult`
+- **直接改 `moving.getBounds()`**（吸附成功时）；返回屏幕坐标辅助线（`guideVX` / `guideHY`，NaN 表示无）
+- **阈值**：`SNAP_THRESHOLD=8`（吸附）/ `ALIGN_THRESHOLD=10`（只显示辅助线）
+- **吸附规则**：当前卡片 左/中/右 ↔ 其它卡片 左/中/右；上/中/下 ↔ 上/中/下
+- **SnapResult**：`hasVertical()` / `hasHorizontal()`；KanbanBoard 据此构造 `activeSnapGuideV/H`（Line2D）再绘制
+
+#### BoardSearchModel（搜索模型，`com.wd.ui.BoardSearchModel`，实例类）
+- **持有**：`searchResults` + `searchFocusIndex`
+- **方法**：`search(cards, keyword)` / `clearSearchState(cards)` / `focusNext()` / `focusPrev()` / `applyFocus(cards, FindCard)` / `scrollToFocus(cards, FindCard, viewport, w, h)` / `removeResultsForCard(cardId)` / `getResultCount()` / `getFocusIndex()`
+- **`SearchResult(cardId, rowIndex)`**：`rowIndex=-1` 表头命中；`rowIndex>=0` 列索引
+- **解耦**：通过函数式接口 `FindCard { KanbanCard find(String id) }` 回调查找卡片，不直接持有 KanbanBoard
+- **KanbanBoard 桥接**：`search`/`clearSearch`/`focusNextSearchResult`/`focusPrevSearchResult` 调用后 `applySearchFocus()` + `repaint()`；`scrollToFocusResult` 用 `getVisibleRect()`
+
+#### BoardContextMenu（右键菜单，`com.wd.ui.BoardContextMenu`，静态工具）
+- **方法**：`buildConnectionMenu(conn, onRepaint, onNotifyChanged, onRemove)` / `buildHeaderMenu(info)` / `buildColumnMenu(col)` / `copyToClipboard(text)`
+- **回调注入**：连线菜单通过 `Runnable onRepaint / onNotifyChanged / onRemove` 解耦，不直接调用 KanbanBoard
+- **主题适配**：`MENU_HOVER_FOREGROUND=#2470B0`（hover 蓝字）+ `patchMenuUiDefaults()`（`UIDefaults` 全局覆盖，`menuUiPatched` 标志防重复）
+- **KanbanBoard 桥接**：`showConnectionContextMenu` / `showHeaderContextMenu` / `showColumnContextMenu` 组装回调后调用工具类
+
+#### BoardPersistence（持久化，`com.wd.ui.BoardPersistence`，静态工具）
+- **方法**：`toChartData(cards, connections)` / `loadFromChartData(data, FindCard, AddConnection)` / `resolveTableInfo(model, project)` / `parseRowIndex(String)`
+- **解耦**：`FindCard { KanbanCard find(String) }` + `AddConnection { void add(src, srcRow, tgt, tgtRow, type) }` 回调
+- **要点**：`resolveTableInfo` 优先用 JSON 保存的 columns（离线可用），否则重新查元信息；`loadFromChartData` 只恢复连线，卡片由调用方先行构建
+
+#### 拆分原则（重要）
+- **纯计算 / 无副作用 → 静态工具类**：SnapHelper、ContextMenu、Persistence、ExportUtil、NotificationUtil
+- **有状态 → 实例类**：Viewport（transform/zoom）、SearchModel（results/index）
+- **强耦合渲染状态留在 KanbanBoard**：`paintComponent` / `paintForExport` / `drawGrid` / `drawCards` / 关联列高亮（`activeHighlightCard` / `relatedRowKeys` / `refreshRelatedRows` / `parseRelatedKeyById`）仍留在原类
+- **解耦用函数式接口回调**：FindCard / AddConnection / Runnable，模块之间不互相 import，只依赖 KanbanCard / Connection 等模型类
+- **KanbanBoard 变成"编排层"**：持有 viewport/searchModel，事件→调用模块方法→`notifyViewChanged()` + `repaint()`

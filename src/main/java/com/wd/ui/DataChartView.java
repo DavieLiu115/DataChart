@@ -1,8 +1,5 @@
 package com.wd.ui;
 
-import com.intellij.notification.Notification;
-import com.intellij.notification.NotificationType;
-import com.intellij.notification.Notifications;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
@@ -127,7 +124,7 @@ public class DataChartView extends DialogWrapper {
 			return;
 		}
 		if (kanbanBoard.getCards() == null || kanbanBoard.getCards().isEmpty()) {
-			showInfoNotification("导出失败", "画板为空，无内容可导出");
+			NotificationUtil.info("导出失败", "画板为空，无内容可导出");
 			return;
 		}
 		JFileChooser chooser = new JFileChooser();
@@ -142,12 +139,12 @@ public class DataChartView extends DialogWrapper {
 			} else {
 				file = new File(file.getParentFile(), file.getName() + ".pdf");
 			}
-			boolean ok = kanbanBoard.exportToPdf(file);
-			if (ok) {
-				showInfoNotification("导出成功", "PDF 已保存到：" + file.getAbsolutePath());
-			} else {
-				showErrorNotification("导出失败", "保存 PDF 失败，请查看日志");
-			}
+		boolean ok = BoardExportUtil.exportToPdf(kanbanBoard, file);
+		if (ok) {
+			NotificationUtil.info("导出成功", "PDF 已保存到：" + file.getAbsolutePath());
+		} else {
+			NotificationUtil.error("导出失败", "保存 PDF 失败，请查看日志");
+		}
 		}
 	}
 
@@ -161,7 +158,7 @@ public class DataChartView extends DialogWrapper {
 			return;
 		}
 		if (kanbanBoard.getCards() == null || kanbanBoard.getCards().isEmpty()) {
-			showInfoNotification("导出失败", "画板为空，无内容可导出");
+			NotificationUtil.info("导出失败", "画板为空，无内容可导出");
 			return;
 		}
 		JFileChooser chooser = new JFileChooser();
@@ -177,29 +174,13 @@ public class DataChartView extends DialogWrapper {
 			} else {
 				file = new File(file.getParentFile(), file.getName() + ".jpg");
 			}
-			boolean ok = kanbanBoard.exportToImage(file, "jpg", 2.0);
-			if (ok) {
-				showInfoNotification("导出成功", "图片已保存到：" + file.getAbsolutePath());
-			} else {
-				showErrorNotification("导出失败", "保存图片失败，请查看日志");
-			}
+		boolean ok = BoardExportUtil.exportToImage(kanbanBoard, file, "jpg", 2.0);
+		if (ok) {
+			NotificationUtil.info("导出成功", "图片已保存到：" + file.getAbsolutePath());
+		} else {
+			NotificationUtil.error("导出失败", "保存图片失败，请查看日志");
 		}
-	}
-
-	/**
-	 * 显示 Info 通知
-	 */
-	private void showInfoNotification(String title, String content) {
-		Notifications.Bus.notify(new Notification(
-				"DataChart", title, content, NotificationType.INFORMATION));
-	}
-
-	/**
-	 * 显示 Error 通知
-	 */
-	private void showErrorNotification(String title, String content) {
-		Notifications.Bus.notify(new Notification(
-				"DataChart", title, content, NotificationType.ERROR));
+		}
 	}
 
 	/**
