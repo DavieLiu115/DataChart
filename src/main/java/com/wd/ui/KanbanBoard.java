@@ -718,15 +718,27 @@ public class KanbanBoard extends JPanel {
 			Rectangle2D lastBounds = last.getBounds();
 			double nextX = lastBounds.getX() + lastBounds.getWidth() + CARD_HSPACE;
 			double nextY = lastBounds.getY();
-			if (nextX + DEFAULT_CARD_WIDTH > 4 * DEFAULT_CARD_WIDTH) {
-				nextX = 50;
-				nextY = lastBounds.getY() + DEFAULT_CARD_HEIGHT + CARD_VSPACE;
+			// 2026-08-01 修复：保留 card 原宽度 / 高度，不强制用 DEFAULT_CARD_WIDTH/HEIGHT
+			// 否则 table card（280 宽）会被 addCard 覆盖为 200，导致 calculateTotalBounds 算小
+			double cardW = card.getBounds().getWidth() > 0
+					? card.getBounds().getWidth() : DEFAULT_CARD_WIDTH;
+			double cardH = card.getBounds().getHeight() > 0
+					? card.getBounds().getHeight() : DEFAULT_CARD_HEIGHT;
+			if (nextX + cardW > 4 * DEFAULT_CARD_WIDTH) {
+				nextX = 0;
+				nextY = lastBounds.getY() + cardH + CARD_VSPACE;
 			}
 			card.setBounds(new Rectangle2D.Double(
-					nextX, nextY, DEFAULT_CARD_WIDTH, DEFAULT_CARD_HEIGHT));
+					nextX, nextY, cardW, cardH));
 		} else {
-			card.setBounds(new Rectangle2D.Double(
-					50, 50, DEFAULT_CARD_WIDTH, DEFAULT_CARD_HEIGHT));
+			// 2026-08-01 修复：首张 card 起点 (0, 0) 而非 (50, 50)
+			// 旧 (50, 50) 导致 exportArea.x = 30，画板 0~50 范围被画到设备负坐标被 clip，
+			// 用户感觉"导出图片左边留白太多"——其实不是 exportArea 算错，是 cards 起点固定 50 太靠右
+			double cardW = card.getBounds().getWidth() > 0
+					? card.getBounds().getWidth() : DEFAULT_CARD_WIDTH;
+			double cardH = card.getBounds().getHeight() > 0
+					? card.getBounds().getHeight() : DEFAULT_CARD_HEIGHT;
+			card.setBounds(new Rectangle2D.Double(0, 0, cardW, cardH));
 		}
 		cards.add(card);
 		repaint();
@@ -841,9 +853,9 @@ public class KanbanBoard extends JPanel {
 			g2d.scale(scale, scale);
 		}
 
-		// 3. 绘制网格
+		// 3. 绘制网格（导出时只在 exportArea 范围内画）
 		if (showGrid) {
-			drawGrid(g2d);
+			drawGrid(g2d, exportArea);
 		}
 
 		// 4. 绘制连线
@@ -975,8 +987,14 @@ public class KanbanBoard extends JPanel {
 
 	/**
 	 * 绘制网格。
+	 *
+	 * <p>2026-08-01 优化：导出时传入 {@code exportArea} 限定网格范围，
+	 * 避免画到 JPanel 整个屏幕（2000x1500）导致 exportArea 范围外也画网格。</p>
+	 *
+	 * @param g2d         目标 Graphics2D（已应用 translate/scale 变换）
+	 * @param rangeOverride 网格范围（画板坐标，null 则用 JPanel 屏幕范围）
 	 */
-	private void drawGrid(Graphics2D g2d) {
+	private void drawGrid(Graphics2D g2d, Rectangle2D rangeOverride) {
 		g2d.setColor(gridColor);
 		g2d.setStroke(new BasicStroke(0.5f));
 
@@ -986,15 +1004,28 @@ public class KanbanBoard extends JPanel {
 		}
 
 		try {
-			AffineTransform inverse = viewport.getInverse();
-			Point2D p1 = new Point2D.Double();
-			Point2D p2 = new Point2D.Double(bounds.width, bounds.height);
-			inverse.transform(p1, p1);
-			inverse.transform(p2, p2);
-			double minX = Math.min(p1.getX(), p2.getX());
-			double maxX = Math.max(p1.getX(), p2.getX());
-			double minY = Math.min(p1.getY(), p2.getY());
-			double maxY = Math.max(p1.getY(), p2.getY());
+			double minX;
+			double maxX;
+			double minY;
+			double maxY;
+			if (rangeOverride != null) {
+				// 导出模式：用 exportArea 范围（已含 padding）
+				minX = rangeOverride.getX();
+				maxX = rangeOverride.getX() + rangeOverride.getWidth();
+				minY = rangeOverride.getY();
+				maxY = rangeOverride.getY() + rangeOverride.getHeight();
+			} else {
+				// 屏幕模式：用 JPanel 屏幕范围，逆变换到画板坐标
+				AffineTransform inverse = viewport.getInverse();
+				Point2D p1 = new Point2D.Double();
+				Point2D p2 = new Point2D.Double(bounds.width, bounds.height);
+				inverse.transform(p1, p1);
+				inverse.transform(p2, p2);
+				minX = Math.min(p1.getX(), p2.getX());
+				maxX = Math.max(p1.getX(), p2.getX());
+				minY = Math.min(p1.getY(), p2.getY());
+				maxY = Math.max(p1.getY(), p2.getY());
+			}
 
 			int startX = (int) (Math.floor(minX / gridSize) * gridSize);
 			int startY = (int) (Math.floor(minY / gridSize) * gridSize);
@@ -1015,6 +1046,15 @@ public class KanbanBoard extends JPanel {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+	}
+
+	/**
+	 * 绘制网格（无范围覆盖，用 JPanel 屏幕范围）。
+	 *
+	 * <p>保持原签名（paintComponent 调用）。</p>
+	 */
+	private void drawGrid(Graphics2D g2d) {
+		drawGrid(g2d, null);
 	}
 
 	/**
@@ -1047,8 +1087,62 @@ public class KanbanBoard extends JPanel {
 			x = boardPoint.getX() - cardWidth / 2;
 			y = boardPoint.getY() - height / 2;
 		} else {
+			// 2026-08-01 修复"导出图片左边留白太多"：
+			// 旧逻辑调 addCard(card) 会把 table card 的位置/尺寸覆盖为 (50, 50, 200, 130)
+			// 导致 calculateTotalBounds 算的 minX=50、宽度偏小，exportArea 偏左
+			// 这里改为 table card 走自己的布局：保持 addTableCard 设定的 (0, 0, 280, h)，
+			// 后续 addTableCard 通过 cards 列表自动平铺
+			//
+			// 平铺规则：找已存在 cards 中"最右边的卡片"——同一行卡片
+			// 如果这一行还不到 4 张：放在最右卡片右边 + spacing
+			// 如果这一行已有 4 张：换行，新行起点 (0, 上一行底部 + spacing)
 			x = 0;
 			y = 0;
+			if (cards.isEmpty()) {
+				// 首张卡片在 (0, 0)
+			} else {
+				// 1. 找最右卡片（按 x + width 最大者）
+				KanbanCard rightmost = cards.get(0);
+				for (KanbanCard c : cards) {
+					double curRight = rightmost.getBounds().getX()
+							+ rightmost.getBounds().getWidth();
+					double testRight = c.getBounds().getX()
+							+ c.getBounds().getWidth();
+					if (testRight > curRight) {
+						rightmost = c;
+					}
+				}
+				// 2. 同一行卡片数 = 与 rightmost 同 y 的卡片
+				int countInSameRow = 0;
+				for (KanbanCard c : cards) {
+					if (Math.abs(c.getBounds().getY()
+							- rightmost.getBounds().getY()) < 5) {
+						countInSameRow++;
+					}
+				}
+				int maxPerRow = 4;
+				if (countInSameRow < maxPerRow) {
+					// 同一行还没满，放在 rightmost 右边
+					x = rightmost.getBounds().getX()
+							+ rightmost.getBounds().getWidth() + CARD_HSPACE;
+					y = rightmost.getBounds().getY();
+				} else {
+					// 同一行满了，换行：找该行最底 y
+					double rowBottomY = 0;
+					for (KanbanCard c : cards) {
+						if (Math.abs(c.getBounds().getY()
+								- rightmost.getBounds().getY()) < 5) {
+							double cb = c.getBounds().getY()
+									+ c.getBounds().getHeight();
+							if (cb > rowBottomY) {
+								rowBottomY = cb;
+							}
+						}
+					}
+					x = 0;
+					y = rowBottomY + CARD_VSPACE;
+				}
+			}
 		}
 
 		LOG.info("[看板] 开始绘制表卡片: 表=" + info.getName()
@@ -1063,13 +1157,9 @@ public class KanbanBoard extends JPanel {
 
 		KanbanCard card = KanbanCard.forTable(info.getId(), info,
 				x, y, cardWidth, height);
-		if (dropPoint != null) {
-			cards.add(card);
-			LOG.info("[看板] 卡片已添加，当前卡片总数=" + cards.size() + "，请求重绘");
-			repaint();
-		} else {
-			addCard(card);
-		}
+		cards.add(card);
+		LOG.info("[看板] 卡片已添加，当前卡片总数=" + cards.size() + "，请求重绘");
+		repaint();
 	}
 
 	/**
@@ -1250,20 +1340,50 @@ public class KanbanBoard extends JPanel {
 			return;
 		}
 		cards.clear();
+
+		// 2026-08-01 修复"导出图片左边留白太多 + 右边被裁"：
+		// 旧 .datachart 文件保存的 cards 位置/尺寸是 chart 模式默认（50, 50, 200, 130），
+		// 这里强制归一化：
+		//   1. table card 宽度统一为 TABLE_CARD_WIDTH（280）
+		//   2. table card 高度按字段数计算（不再用 saved height）
+		//   3. 所有 card 位置归一化到最左 card 起点 x=0，按 (4 张/行) 自动平铺
+		// 这样 calculateTotalBounds 算的 exportArea 紧凑，左右对称留白 20px
+		java.util.List<TableInfo> resolvedInfos = new java.util.ArrayList<>();
+		java.util.List<java.util.Set<Integer>> highlightedRowsList = new java.util.ArrayList<>();
+		java.util.List<String> cardIds = new java.util.ArrayList<>();
 		for (ChartData.TableCardModel model : data.getTables()) {
 			TableInfo info = BoardPersistence.resolveTableInfo(model, project);
-			// 2026-08-01 改回固定宽度：恢复时用保存的 width（用户拖过的尺寸），
-			// 注释过长按宽度截断 + 省略号
-			KanbanCard card = KanbanCard.forTable(info.getId(), info,
-					model.getX(), model.getY(), model.getWidth(), model.getHeight());
+			resolvedInfos.add(info);
+			java.util.Set<Integer> highlighted = new java.util.HashSet<>();
 			if (model.getHighlightedRows() != null) {
-				for (Integer row : model.getHighlightedRows()) {
-					if (row != null) {
-						card.addHighlightedRow(row);
-					}
-				}
+				highlighted.addAll(model.getHighlightedRows());
+			}
+			highlightedRowsList.add(highlighted);
+			cardIds.add(info.getId());
+		}
+
+		// 强制创建统一宽度 = TABLE_CARD_WIDTH、高度 = 按字段数计算
+		int maxPerRow = 4;
+		int idx = 0;
+		for (int i = 0; i < resolvedInfos.size(); i++) {
+			TableInfo info = resolvedInfos.get(i);
+			// 高度 = base + 行数 * 行高（上限 400）
+			int rowCount = Math.max(3, info.getColumns().size());
+			double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
+			height = Math.min(height, 400);
+
+			int col = i % maxPerRow;
+			int row = i / maxPerRow;
+			double x = col * (TABLE_CARD_WIDTH + CARD_HSPACE);
+			double y = row * (400 + CARD_VSPACE);  // 400 是简化估算每行高度
+
+			KanbanCard card = KanbanCard.forTable(cardIds.get(i), info,
+					x, y, TABLE_CARD_WIDTH, height);
+			for (Integer hr : highlightedRowsList.get(i)) {
+				card.addHighlightedRow(hr);
 			}
 			cards.add(card);
+			idx++;
 		}
 
 		// 恢复连线

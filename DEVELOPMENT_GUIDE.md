@@ -369,3 +369,46 @@ if (maxCmtW > 10) {
 #### 说明
 - 20px > 卡片阴影偏移（约 2px），阴影不会被裁
 - 对称 padding 保证四边留白均匀（内容居中）
+
+### 24. 修复"导出图片左边留白太多"（2026-08-01）
+#### 根因
+- `addTableCard` 无 dropPoint 时调 `addCard(card)`，`addCard` 把 table card 位置覆盖为 (50, 50)，宽度变成 `DEFAULT_CARD_WIDTH=200`（而非 280）
+- cards 起点固定 (50, 50) → `calculateTotalBounds` 算的 minX=50，exportArea.x=30
+- 画板 x=0~50 范围（50px）被画到设备 x=-30~20，但 x<0 部分被 clip → 视觉上"左边留白 20px 看着很多"
+
+#### 修复
+- **`addCard` 首张起点从 (50, 50) 改为 (0, 0)**，保留 card 原宽度/高度（不强制 DEFAULT_CARD_WIDTH）
+- **`addTableCard` 不再调 `addCard`**，自己管理布局（首张 (0, 0)，后续自动平铺）
+- **`drawGrid` 增加 rangeOverride 参数**，导出时传入 exportArea 范围，只在 exportArea 内画网格
+
+#### 设计取舍
+- 不归一化 `loadFromChartData` 的 cards 位置（保留用户拖动意图）
+- 用户重新拖入 cards 即可生效（新建场景从 (0, 0) 开始）
+- 已存在的 .datachart 文件需要用户重新调整位置
+
+### 25. 二次修复"导出图片错位"（2026-08-01 继续迭代）
+#### 用户反馈
+- 24 节修复后仍然不对，截图显示：左边大块空白 + 右边 sys_job 被裁
+- "还是不对，仔细检查，修复"
+
+#### 根因
+- **旧 .datachart 文件**保存的 cards 位置/尺寸是 chart 模式默认：
+  - x=50, y=50, w=200, h=130（被旧 `addCard` 强制写入）
+- `loadFromChartData` 用 `model.getWidth()` (=200) 还原 card → table card 渲染宽度=200
+- 多个 cards 实际宽度比预期 280 窄 → exportArea 算得偏小 → 右边内容溢出被裁
+
+#### 修复
+- **`loadFromChartData` 强制归一化**：
+  - table card 宽度 = `TABLE_CARD_WIDTH` (280)
+  - 高度按字段数计算（base + rows * 18，上限 400）
+  - 位置按"4 张/行"自动平铺，起点 (0, 0)
+- **`addTableCard` 无 dropPoint 分支**重写：用"最右卡片"逻辑判断是否换行
+  - 找 cards 中 rightmost，按"同 Y 行"分组
+  - 同行 < 4 张：在 rightmost 右边 +30 spacing 放
+  - 同行 = 4 张：换行到 (0, rowBottom + 30)
+- **`addCard` 换行时 `nextX = 0`** 而非 50
+
+#### 编译
+- `./gradlew compileJava --rerun-tasks` BUILD SUCCESSFUL
+- 0 lint 错误
+- 笔记：DEVELOPMENT_GUIDE.md 第 25 节
