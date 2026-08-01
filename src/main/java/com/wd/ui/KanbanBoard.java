@@ -1110,34 +1110,69 @@ public class KanbanBoard extends JPanel {
 	 * @param dark      是否深色主题
 	 */
 	public void paintForExport(Graphics2D g2d, Rectangle2D exportArea, boolean dark) {
+		paintForExport(g2d, exportArea, dark, 1.0);
+	}
+
+	/**
+	 * 导出用绘制方法：把画板内容绘制到传入的 Graphics2D，不包含屏幕坐标的对齐辅助线 / tooltip
+	 *
+	 * <p>导出时不需要应用 {@code transform}（zoomFactor 视为 1.0），按卡片合并包围盒
+	 * 平移 g2d，使 (minX, minY) 落到 (0, 0) 位置。背景从 (0,0) 填到 (width, height)，
+	 * 避免 BufferedImage 默认黑色透出来。</p>
+	 *
+	 * <p>传入 {@code scale > 1.0} 时相当于"高 DPI 渲染"：stroke 宽度 / 字号 / 图标
+	 * 都会被 Java 2D 自动放大，输出文件大小也按 scale 比例放大。</p>
+	 *
+	 * @param g2d        目标 Graphics2D（来自 BufferedImage 或 PdfGraphics2D）
+	 * @param exportArea 导出区域（来自 {@link #calculateTotalBounds()}）
+	 * @param dark       是否深色主题
+	 * @param scale      缩放倍数（1.0 = 原始，2.0 = 2x 高清）
+	 */
+	public void paintForExport(Graphics2D g2d, Rectangle2D exportArea, boolean dark, double scale) {
+		if (scale <= 0) {
+			scale = 1.0;
+		}
 		// 渲染提示
 		g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 		g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
 		g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+		// 字体子像素精度，避免低分辨率下字符粘连
+		g2d.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS,
+				RenderingHints.VALUE_FRACTIONALMETRICS_ON);
 
 		double minX = exportArea.getX();
 		double minY = exportArea.getY();
+		int width = (int) exportArea.getWidth();
+		int height = (int) exportArea.getHeight();
 
-		// 1. 绘制背景（不透明，避免 PDF 中出现透明）
-		g2d.setColor(backgroundColor);
-		g2d.fillRect((int) minX, (int) minY,
-				(int) exportArea.getWidth(), (int) exportArea.getHeight());
-
-		// 2. 平移使 (minX, minY) 到 (0, 0)
+		// 1. 先应用 scale 缩放（影响后续所有 stroke / font 宽度）
+		// 2. 再平移使 (minX, minY) 到 (0, 0) —— 必须先平移，否则 fillRect 起点 (minX, minY)
+		//    不会覆盖到 (0,0) 区域，导致 BufferedImage 初始黑色透出来
+		// 注意：scale 之后 fillRect 的 (0,0, width, height) 仍然在用户坐标空间（因为 g2d 的
+		// transform 链是 scale * translate）。这里 width/height 不乘 scale，因为 BufferedImage
+		// 大小已经预先按 scale 放大；paintForExport 接收的是逻辑 exportArea
 		g2d.translate(-minX, -minY);
+		if (scale != 1.0) {
+			g2d.scale(scale, scale);
+		}
 
-		// 3. 绘制网格
+		// 3. 绘制背景（不透明，从 (0,0) 开始填到 (width, height)，避免黑色透出）
+		//    在 scale 后的坐标系下，宽高应该按 exportArea 的逻辑尺寸
+		g2d.setColor(backgroundColor);
+		g2d.fillRect(0, 0, width, height);
+
+		// 4. 绘制网格
 		if (showGrid) {
 			drawGrid(g2d);
 		}
 
-		// 4. 绘制连线
+		// 5. 绘制连线
 		for (Connection conn : connections) {
 			conn.draw(g2d);
 		}
 
-		// 5. 绘制所有卡片
+		// 6. 绘制所有卡片
 		Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = computeLinkedRows();
 		refreshRelatedRows();
 		for (KanbanCard c : cards) {
@@ -1281,7 +1316,7 @@ public class KanbanBoard extends JPanel {
 		BufferedImage img = new BufferedImage(targetW, targetH, imageType);
 		Graphics2D g2 = img.createGraphics();
 		try {
-			paintForExport(g2, exportArea, isDarkTheme());
+			paintForExport(g2, exportArea, isDarkTheme(), scale);
 		} finally {
 			g2.dispose();
 		}

@@ -37,7 +37,6 @@ public class DataChartView extends DialogWrapper {
 	private JButton exportPDFButton;
 	private JButton exportPictureButton;
 	private SearchTextField searchTextField;
-	private JButton fullScreamButton;
 	private JLabel zoomPercentLabel;
 	private JPanel dataView;
 	private JButton focusButton;
@@ -71,7 +70,7 @@ public class DataChartView extends DialogWrapper {
 		initKanbanBoard();
 		setupToolBarButtons();
 
-		fullScreamButton.setIcon(PluginIcons.fullScream);
+		//fullScreamButton.setIcon(PluginIcons.fullScream);
 		exportPDFButton.setIcon(PluginIcons.export);
 		exportPictureButton.setIcon(PluginIcons.image);
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
@@ -93,10 +92,10 @@ public class DataChartView extends DialogWrapper {
 				}
 			});
 		}
-		if (fullScreamButton != null) {
-			fullScreamButton.setToolTipText("进入全屏模式");
-			fullScreamButton.addActionListener(e -> toggleFullScreen());
-		}
+		//if (fullScreamButton != null) {
+		//	fullScreamButton.setToolTipText("进入全屏模式");
+		//	fullScreamButton.addActionListener(e -> toggleFullScreen());
+		//}
 		if (exportPDFButton != null) {
 			exportPDFButton.setToolTipText("导出为 PDF 文件");
 			exportPDFButton.addActionListener(e -> exportAsPdf());
@@ -178,7 +177,7 @@ public class DataChartView extends DialogWrapper {
 			} else {
 				file = new File(file.getParentFile(), file.getName() + ".jpg");
 			}
-			boolean ok = kanbanBoard.exportToImage(file, "jpg", 1.0);
+			boolean ok = kanbanBoard.exportToImage(file, "jpg", 2.0);
 			if (ok) {
 				showInfoNotification("导出成功", "图片已保存到：" + file.getAbsolutePath());
 			} else {
@@ -248,9 +247,9 @@ public class DataChartView extends DialogWrapper {
 			hiddenOnFullScreen.add(zoomPercentLabel);
 		}
 		// 切换按钮外观：图标 + 文字
-		fullScreamButton.setIcon(PluginIcons.exit_fullScream);
-		fullScreamButton.setText("ExitFullScream");
-		fullScreamButton.setToolTipText("退出全屏");
+		//fullScreamButton.setIcon(PluginIcons.exit_fullScream);
+		//fullScreamButton.setText("ExitFullScream");
+		//fullScreamButton.setToolTipText("退出全屏");
 	}
 
 	/**
@@ -263,9 +262,9 @@ public class DataChartView extends DialogWrapper {
 			}
 		}
 		hiddenOnFullScreen.clear();
-		fullScreamButton.setIcon(PluginIcons.fullScream);
-		fullScreamButton.setText("FullScream");
-		fullScreamButton.setToolTipText("进入全屏模式");
+		//fullScreamButton.setIcon(PluginIcons.fullScream);
+		//fullScreamButton.setText("FullScream");
+		//fullScreamButton.setToolTipText("进入全屏模式");
 	}
 
 	/**

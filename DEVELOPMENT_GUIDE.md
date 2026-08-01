@@ -226,3 +226,12 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - 复用 `paintForExport` 共享 PDF / Image 绘制逻辑，避免两份 paintComponent 走偏
   - 默认文件名用 `getNameWithoutExtension()` 而非 `getName()`，避免 `.datachart` 出现在 `xxx.datachart_20260801_xxx.pdf` 这种叠加后缀
   - 后缀兼容：用户没写 .pdf / .jpg 时自动补，避免保存成无后缀文件
+
+#### 导出图片已知问题修复（2026-08-01）
+- **黑色背景问题**：原实现 `fillRect((int) minX, (int) minY, ...)` 起点是 (minX, minY) 而非 (0, 0)，导致 BufferedImage 默认 0x000000 黑色从 (0,0) 到 (minX, minY) 区域透出，导出图片左/底部出现大块黑色
+  - **修复**：先 `g2d.translate(-minX, -minY)` 再 `fillRect(0, 0, width, height)`，从 (0,0) 开始填背景
+- **清晰度问题**：原默认 scale=1.0 导出 11pt 字体渲染到 11px 像素，字小且模糊
+  - **修复**：默认 scale 改为 2.0（2x 高 DPI），字号 / stroke 自动放大；`KEY_FRACTIONALMETRICS_ON` 启用子像素精度
+  - `paintForExport` 增加 `scale` 参数：先 `translate(-minX, -minY)` 再 `scale(s, s)`，transform 链 = scale ∘ translate，最终 `T(P) = (P-min)*scale + 0`，让 (min, min) 落在像素 (0,0)、(min+w, min+h) 落在 (w*s, h*s) = BufferedImage 实际大小
+- **API 重载**：`paintForExport(g2d, area, dark)` 重载为 `paintForExport(g2d, area, dark, scale)`，scale=1.0 保持原行为
+- **PDF 不传 scale**：PDF 是矢量，scale 始终 1.0，由 `document` 的 `Rectangle(width, height)` 决定尺寸

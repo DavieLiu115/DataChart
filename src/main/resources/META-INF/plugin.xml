@@ -38,5 +38,8 @@
         <internalFileTemplate name="DataChart"/>
 
         <projectService serviceImplementation="com.wd.db.TableMetadataService"/>
+
+        <!-- 通知组：用于导出 PDF / 图片等操作的系统通知 -->
+        <notificationGroup id="DataChart" displayType="BALLOON"/>
     </extensions>
 </idea-plugin>
