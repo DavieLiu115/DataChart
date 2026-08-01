@@ -63,6 +63,8 @@ public class KanbanCard {
 	// 样式
 	private int headerHeight = 28;
 	private int padding = 10;
+	/** 表格卡片每行高度（与 drawTableCard 内部 rowHeight 保持一致，供外部精确滚动使用） */
+	public static final int ROW_HEIGHT = 18;
 	private Font headerFont = new Font(Font.SANS_SERIF, Font.BOLD, 13);
 	private Font bodyFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
 	private Font columnFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
@@ -105,6 +107,10 @@ public class KanbanCard {
 	private static final Color USER_HIGHLIGHT_COLOR = new Color(0xFE9933);
 	/** 行选中高亮背景色（橙色，参考 DataHelper） */
 	private static final Color ROW_HIGHLIGHT_COLOR_ORANGE = new Color(0xFF9F5B);
+	/** 搜索命中行背景色（淡黄，柔和不刺眼，深色/浅色主题通用） */
+	private static final Color SEARCH_HIGHLIGHT_COLOR = new Color(0xFFF3B0);
+	/** 搜索焦点行背景色（深黄，键盘上下键导航到的当前行） */
+	private static final Color SEARCH_HIGHLIGHT_FOCUS_COLOR = new Color(0xFFD24A);
 
 	/**
 	 * 构造方法（图表模式）
@@ -221,6 +227,78 @@ public class KanbanCard {
 	private final java.util.Map<Integer, java.awt.Color> activeRowColors = new java.util.HashMap<>();
 
 	/**
+	 * 搜索命中的行集合（区别于用户选中的橙色高亮，使用淡黄色高亮）
+	 *
+	 * <p>由 {@code KanbanBoard.search()} 写入，{@link #drawTableCard} 读取后渲染。
+	 * 当前"焦点行"（键盘上下键导航到的命中项）也会写入此集合，但用更深的颜色标记。</p>
+	 */
+	private final java.util.Set<Integer> searchMatchedRows = new java.util.HashSet<>();
+
+	/** 当前搜索的"焦点行"（键盘上下键导航到的那一行），-1 表示无焦点行 */
+	private int searchFocusRow = -1;
+
+	/**
+	 * 是否当前是搜索的"焦点卡片"（键盘导航到的卡片）
+	 *
+	 * <p>用于在表头命中（rowIndex=-1）时把卡片边框换成搜索黄色作为视觉标记。</p>
+	 */
+	private boolean isSearchFocusCard = false;
+
+	/**
+	 * 获取搜索命中行集合
+	 */
+	public java.util.Set<Integer> getSearchMatchedRows() {
+		return searchMatchedRows;
+	}
+
+	/**
+	 * 设置搜索命中行集合（覆盖之前的）
+	 */
+	public void setSearchMatchedRows(java.util.Collection<Integer> rows) {
+		searchMatchedRows.clear();
+		if (rows != null) {
+			searchMatchedRows.addAll(rows);
+		}
+	}
+
+	/**
+	 * 清除搜索命中行集合
+	 */
+	public void clearSearchMatchedRows() {
+		searchMatchedRows.clear();
+		searchFocusRow = -1;
+		isSearchFocusCard = false;
+	}
+
+	/**
+	 * 获取当前搜索焦点行（-1 表示无）
+	 */
+	public int getSearchFocusRow() {
+		return searchFocusRow;
+	}
+
+	/**
+	 * 设置当前搜索焦点行（-1 表示清除）
+	 */
+	public void setSearchFocusRow(int row) {
+		this.searchFocusRow = row;
+	}
+
+	/**
+	 * 是否当前是搜索的"焦点卡片"
+	 */
+	public boolean isSearchFocusCard() {
+		return isSearchFocusCard;
+	}
+
+	/**
+	 * 设置是否为搜索的"焦点卡片"
+	 */
+	public void setSearchFocusCard(boolean focus) {
+		this.isSearchFocusCard = focus;
+	}
+
+	/**
 	 * 设置临时行高亮色
 	 */
 	public void setActiveRowColor(int row, java.awt.Color color) {
@@ -309,8 +387,7 @@ public class KanbanCard {
 		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
 			return null;
 		}
-		int rowHeight = 18;
-		double rowCenterY = bounds.getY() + headerHeight + rowIndex * rowHeight + rowHeight / 2.0;
+		double rowCenterY = bounds.getY() + headerHeight + rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2.0;
 		double rightX = bounds.getX() + bounds.getWidth();
 		return new java.awt.geom.Point2D.Double(rightX, rowCenterY);
 	}
@@ -322,8 +399,7 @@ public class KanbanCard {
 		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
 			return null;
 		}
-		int rowHeight = 18;
-		double rowCenterY = bounds.getY() + headerHeight + rowIndex * rowHeight + rowHeight / 2.0;
+		double rowCenterY = bounds.getY() + headerHeight + rowIndex * ROW_HEIGHT + ROW_HEIGHT / 2.0;
 		double leftX = bounds.getX();
 		return new java.awt.geom.Point2D.Double(leftX, rowCenterY);
 	}
@@ -372,7 +448,7 @@ public class KanbanCard {
 		if (tableInfo == null || rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
 			return -1;
 		}
-		return bounds.getY() + headerHeight + rowIndex * 18;
+		return bounds.getY() + headerHeight + rowIndex * ROW_HEIGHT;
 	}
 
 	/**
@@ -447,7 +523,7 @@ public class KanbanCard {
 		if (boardY < y + headerHeight) {
 			return -1; // header 区域
 		}
-		int rowHeight = 18;
+		int rowHeight = ROW_HEIGHT;
 		double bodyTop = y + headerHeight;
 		int rowIndex = (int) ((boardY - bodyTop) / rowHeight);
 		if (rowIndex < 0 || rowIndex >= tableInfo.getColumns().size()) {
@@ -505,7 +581,8 @@ public class KanbanCard {
 	 */
 	private void drawChartCard(Graphics2D g2d, boolean isDark) {
 		Color bg = isDark ? BG_DARK : BG_LIGHT;
-		Color border = selected ? BORDER_SELECTED : BORDER;
+		Color border = isSearchFocusCard ? SEARCH_HIGHLIGHT_FOCUS_COLOR
+				: selected ? BORDER_SELECTED : BORDER;
 		Color textColor = isDark ? TEXT_LIGHT : TEXT_DARK;
 		Color commentColor = isDark ? new Color(0xBBBBBB) : COMMENT_COLOR;
 
@@ -587,7 +664,8 @@ public class KanbanCard {
 	private void drawTableCard(Graphics2D g2d, boolean isDark,
 			java.util.Map<Integer, java.awt.Color> linkedRows) {
 		Color bg = isDark ? BG_DARK : BG_LIGHT;
-		Color border = selected ? BORDER_SELECTED : BORDER;
+		Color border = isSearchFocusCard ? SEARCH_HIGHLIGHT_FOCUS_COLOR
+				: selected ? BORDER_SELECTED : BORDER;
 		Color textColor = isDark ? TEXT_LIGHT : TEXT_DARK;
 		Color commentColor = isDark ? new Color(0xBBBBBB) : COMMENT_COLOR;
 		Color separatorColor = isDark ? new Color(0x555555) : new Color(0xEEEEEE);
@@ -665,7 +743,7 @@ public class KanbanCard {
 		double maxBodyY = bounds.getY() + bounds.getHeight() - padding;
 
 		// 行高 18px（之前 20 太大，导致最后一行高度过大）
-		int rowHeight = 18;
+		int rowHeight = ROW_HEIGHT;
 
 		g2d.setFont(columnFont);
 		FontMetrics colFm = g2d.getFontMetrics();
@@ -693,11 +771,16 @@ public class KanbanCard {
 					(int) (bounds.getX() + bounds.getWidth()), (int) rowTop);
 
 			// 行高亮背景（在分隔线之后画，覆盖在卡片背景上）
-			// 优先级：用户选中（橙色） > 连线占用（线色）> 普通
+			// 优先级：用户选中（橙色） > 搜索焦点行（深黄） > 搜索命中行（淡黄） > 连线占用（线色）> 普通
 			Color highlightColor = null;
 			if (highlightedRows.contains(i)) {
 				// 用户手动选中（橙色 #FE9933）
 				highlightColor = USER_HIGHLIGHT_COLOR;
+			} else if (searchMatchedRows.contains(i)) {
+				// 搜索命中：焦点行用更深的黄色（#FFD24A），普通命中用淡黄色（#FFF3B0）
+				highlightColor = (i == searchFocusRow)
+						? SEARCH_HIGHLIGHT_FOCUS_COLOR
+						: SEARCH_HIGHLIGHT_COLOR;
 			} else if (linkedRows != null && linkedRows.get(i) != null) {
 				// 连线占用（用连线自身的颜色）
 				highlightColor = linkedRows.get(i);

@@ -155,3 +155,21 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - `ALIGN_GUIDE_COLOR_DARK = #FFB266`（深色）
 - 关联列高亮 `RELATED_ROW_COLOR = #FD9933` 在两套主题下都能看清，不需要切换
 - 复制菜单的 `setEnabled` 处理空注释情况，避免用户点了无效果
+
+### 16. 搜索功能（DataChartView + KanbanBoard）
+- **入口**：`DataChartView` 顶部工具栏的 `SearchTextField`，回车触发 `doSearch()` → `kanbanBoard.search(keyword)`
+- **搜索范围**：遍历 `cards`，对每张卡片检查 表名、表注释（= `description`）、列名、列注释，**不区分大小写**子串匹配
+- **结果表示**：`KanbanBoard.SearchResult(cardId, rowIndex)` 列表；`rowIndex = -1` 表示表头命中，否则是列索引
+- **高亮颜色**：
+  - 普通命中行 `SEARCH_HIGHLIGHT_COLOR = #FFF3B0`（淡黄，柔和不刺眼）
+  - 焦点行（键盘上下键导航到的）`SEARCH_HIGHLIGHT_FOCUS_COLOR = #FFD24A`（深黄，显著）
+  - 焦点卡片（表头命中时）把卡片边框换成深黄，整张卡片作为视觉锚点
+- **行高亮优先级**（drawTableCard 中）：用户选中（橙）> 搜索焦点行（深黄）> 搜索命中行（淡黄）> 连线占用（线色）
+- **上下键导航**：`DataChartView.setupSearchField` 给 `searchTextField.getTextEditor()` 加 `KeyListener`，`VK_DOWN` → `focusNextSearchResult()`，`VK_UP` → `focusPrevSearchResult()`，循环切换
+- **滚动到焦点**：`scrollToFocusResult()` 根据 `transform` 反推 translate，让焦点行中心落到视口中心（屏幕坐标）
+- **状态显示**：复用 `zoomPercentLabel` 区域右侧显示 "100% | 3/12"（当前/总数），无结果时恢复纯百分比
+- **ESC 键**：清空搜索文本 + 调用 `kanbanBoard.clearSearch()`，重置状态显示
+- **删除卡片同步**：`KanbanBoard.removeSearchResultsForCard(cardId)` 同步清理搜索结果中该卡的所有项，并修正焦点下标
+- **加载文件清空搜索**：`DataChartView.loadFromJson` 加载新文件后清空搜索框和搜索结果，避免旧结果干扰
+- **行高常量**：`KanbanCard.ROW_HEIGHT = 18` 提为 public 常量，所有 `getRowRight/getRowLeft/getRowTop/getRowIndexAt/drawTableCard` 统一引用，避免硬编码散落
+- **设计原则**：搜索不影响用户选中的橙色高亮，不影响连线占用色，搜索状态独立成一套"黄色系"高亮

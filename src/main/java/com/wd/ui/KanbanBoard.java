@@ -176,6 +176,38 @@ public class KanbanBoard extends JPanel {
 	/** 保存动作（Command+S / Ctrl+S 触发） */
 	private Runnable saveAction;
 
+	/**
+	 * 搜索结果列表：按"卡片 + 行"为单位的有序列表
+	 *
+	 * <p>每次执行 {@link #search(String)} 后重建；上下键导航时通过 {@link #focusSearchResultAt(int)}
+	 * 滚动到指定结果。</p>
+	 */
+	private final List<SearchResult> searchResults = new ArrayList<>();
+
+	/** 当前"焦点"搜索结果在 {@link #searchResults} 中的下标，-1 表示无焦点 */
+	private int searchFocusIndex = -1;
+
+	/**
+	 * 搜索结果单元：表示 (cardId, rowIndex) 形式的命中位置
+	 */
+	public static class SearchResult {
+		private final String cardId;
+		private final int rowIndex;
+
+		public SearchResult(String cardId, int rowIndex) {
+			this.cardId = cardId;
+			this.rowIndex = rowIndex;
+		}
+
+		public String getCardId() {
+			return cardId;
+		}
+
+		public int getRowIndex() {
+			return rowIndex;
+		}
+	}
+
 	public KanbanBoard(Project project) {
 		this.project = project;
 		setBackground(backgroundColor);
@@ -546,6 +578,171 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
+	 * 执行搜索：遍历所有卡片，对每张卡片的表名/列名/列注释做不区分大小写的子串匹配
+	 *
+	 * <p>匹配命中后写入 {@link #searchResults} 列表，同时把所有命中行加入
+	 * 对应卡片的 {@code searchMatchedRows} 集合中。第一个命中作为当前焦点。</p>
+	 *
+	 * @param keyword 搜索关键词（null 或空字符串表示清空搜索）
+	 * @return 搜索结果数量
+	 */
+	public int search(String keyword) {
+		clearSearch();
+
+		if (keyword == null || keyword.trim().isEmpty()) {
+			repaint();
+			return 0;
+		}
+
+		String lower = keyword.trim().toLowerCase();
+		for (KanbanCard card : cards) {
+			// 1. 表名命中（表名行号约定为 -1，与 drawTableCard 的 header 区域一致）
+			String tableName = card.getName() == null ? "" : card.getName();
+			String tableComment = card.getDescription() == null ? "" : card.getDescription();
+			if (tableName.toLowerCase().contains(lower)
+					|| tableComment.toLowerCase().contains(lower)) {
+				// 表名命中：只记录一个虚拟结果，rowIndex = -1（表示表头）
+				searchResults.add(new SearchResult(card.getId(), -1));
+			}
+
+			// 2. 列名 / 列注释命中
+			if (card.isTableMode() && card.getTableInfo() != null) {
+				List<ColumnInfo> columns = card.getTableInfo().getColumns();
+				for (int i = 0; i < columns.size(); i++) {
+					ColumnInfo col = columns.get(i);
+					String colName = col.getName() == null ? "" : col.getName();
+					String colCmt = col.getComment() == null ? "" : col.getComment();
+					if (colName.toLowerCase().contains(lower)
+							|| colCmt.toLowerCase().contains(lower)) {
+						searchResults.add(new SearchResult(card.getId(), i));
+						card.getSearchMatchedRows().add(i);
+					}
+				}
+			}
+		}
+
+		// 默认聚焦第一个结果（如果存在）
+		if (!searchResults.isEmpty()) {
+			searchFocusIndex = 0;
+			applySearchFocus();
+		}
+
+		repaint();
+		return searchResults.size();
+	}
+
+	/**
+	 * 清空搜索状态（命中行 + 焦点行 + 结果列表）
+	 */
+	public void clearSearch() {
+		searchResults.clear();
+		searchFocusIndex = -1;
+		for (KanbanCard card : cards) {
+			card.clearSearchMatchedRows();
+		}
+		repaint();
+	}
+
+	/**
+	 * 获取当前搜索结果数量
+	 */
+	public int getSearchResultCount() {
+		return searchResults.size();
+	}
+
+	/**
+	 * 获取当前搜索焦点下标（-1 表示无焦点）
+	 */
+	public int getSearchFocusIndex() {
+		return searchFocusIndex;
+	}
+
+	/**
+	 * 切换到下一个搜索结果（下箭头）
+	 */
+	public void focusNextSearchResult() {
+		if (searchResults.isEmpty()) {
+			return;
+		}
+		searchFocusIndex = (searchFocusIndex + 1) % searchResults.size();
+		applySearchFocus();
+		scrollToFocusResult();
+		repaint();
+	}
+
+	/**
+	 * 切换到上一个搜索结果（上箭头）
+	 */
+	public void focusPrevSearchResult() {
+		if (searchResults.isEmpty()) {
+			return;
+		}
+		searchFocusIndex = (searchFocusIndex - 1 + searchResults.size()) % searchResults.size();
+		applySearchFocus();
+		scrollToFocusResult();
+		repaint();
+	}
+
+	/**
+	 * 把当前焦点结果写入对应卡片的 searchFocusRow
+	 */
+	private void applySearchFocus() {
+		// 先清掉所有卡片的旧焦点
+		for (KanbanCard card : cards) {
+			card.setSearchFocusRow(-1);
+			card.setSearchFocusCard(false);
+		}
+		if (searchFocusIndex < 0 || searchFocusIndex >= searchResults.size()) {
+			return;
+		}
+		SearchResult r = searchResults.get(searchFocusIndex);
+		KanbanCard target = findCardById(r.getCardId());
+		if (target != null) {
+			target.setSearchFocusRow(r.getRowIndex());
+			// 焦点卡片标志：用于表头命中（rowIndex=-1）时把卡片边框变黄
+			target.setSearchFocusCard(true);
+		}
+	}
+
+	/**
+	 * 平移画板让当前焦点结果进入视口
+	 */
+	private void scrollToFocusResult() {
+		if (searchFocusIndex < 0 || searchFocusIndex >= searchResults.size()) {
+			return;
+		}
+		SearchResult r = searchResults.get(searchFocusIndex);
+		KanbanCard target = findCardById(r.getCardId());
+		if (target == null) {
+			return;
+		}
+		Rectangle2D b = target.getBounds();
+		double cardCenterX, cardCenterY;
+		if (r.getRowIndex() < 0) {
+			// 焦点在表头：把卡片整体居中
+			cardCenterX = b.getX() + b.getWidth() / 2.0;
+			cardCenterY = b.getY() + b.getHeight() / 2.0;
+		} else {
+			// 焦点在某一行：精确滚动到行中心
+			double rowTop = target.getRowTop(r.getRowIndex());
+			double rowCenterY = rowTop + KanbanCard.ROW_HEIGHT / 2.0;
+			cardCenterX = b.getX() + b.getWidth() / 2.0;
+			cardCenterY = rowCenterY;
+		}
+		// 视口中心（屏幕坐标）
+		java.awt.Rectangle view = getVisibleRect();
+		double viewCenterX = view.getX() + view.getWidth() / 2.0;
+		double viewCenterY = view.getY() + view.getHeight() / 2.0;
+		// 当前屏幕坐标 = 画板坐标 * zoomFactor + translate
+		// 要让 cardCenter 落在 viewCenter，反推 translate
+		double currentScreenX = cardCenterX * zoomFactor + transform.getTranslateX();
+		double currentScreenY = cardCenterY * zoomFactor + transform.getTranslateY();
+		double dx = viewCenterX - currentScreenX;
+		double dy = viewCenterY - currentScreenY;
+		transform.translate(dx / zoomFactor, dy / zoomFactor);
+	}
+
+	/**
 	 * 删除选中的卡片。
 	 *
 	 * <p>删除前检查是否有与其他表的连线，如有则弹出二次确认对话框。</p>
@@ -581,8 +778,42 @@ public class KanbanBoard extends JPanel {
 		if (activeHighlightCard == card) {
 			clearActiveHighlight();
 		}
+		// 同步清理搜索结果中被删除卡片的项
+		removeSearchResultsForCard(card.getId());
 		repaint();
 		notifyBoardChanged();
+	}
+
+	/**
+	 * 从搜索结果中移除指定 cardId 的所有项，并修正焦点下标
+	 */
+	private void removeSearchResultsForCard(String cardId) {
+		if (searchResults.isEmpty()) {
+			return;
+		}
+		java.util.Iterator<SearchResult> it = searchResults.iterator();
+		int removedBeforeFocus = 0;
+		int currentIndex = 0;
+		while (it.hasNext()) {
+			it.next();
+			if (cardId.equals(searchResults.get(currentIndex).getCardId())) {
+				it.remove();
+				if (currentIndex < searchFocusIndex) {
+					removedBeforeFocus++;
+				} else if (currentIndex == searchFocusIndex) {
+					removedBeforeFocus++; // 焦点项被移除，等价于"前移"以便 clamp 后落在下一个
+				}
+			}
+			currentIndex++;
+		}
+		if (removedBeforeFocus > 0) {
+			searchFocusIndex -= removedBeforeFocus;
+		}
+		if (searchFocusIndex >= searchResults.size()) {
+			searchFocusIndex = searchResults.isEmpty() ? -1 : searchResults.size() - 1;
+		}
+		// 重设焦点
+		applySearchFocus();
 	}
 
 	/**
