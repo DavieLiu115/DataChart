@@ -328,3 +328,30 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - 中英文混排：FontMetrics.stringWidth 真实测量比 `char.length() * 7` 估算精确
 - 高 DPI 场景下需要留意缩放（Mac Retina），但 FontMetrics 已感知系统 DPI
 - 用户拖动手动改的 width > computed 会被保留（适配"用户故意加宽"场景）
+
+### 22. 卡片宽度改回固定值 + 注释截断（2026-08-01 用户反馈改回）
+
+#### 需求变更
+- 用户反馈："每个表的宽度应该是固定的，一样的，注释太长截取一部分，后面用省略号"
+- 之前的 21 节按需加宽让不同表宽度不一致（sys_job 460, gen_field_config 可能 280），不满足"统一"要求
+
+#### 方案
+- 改回固定宽度：`KanbanBoard.TABLE_CARD_WIDTH = 280`（所有表都用这个）
+- 注释过长时由 `KanbanCard.truncateByWidth(text, maxWidth, fm)` 截断 + 省略号（已存在的工具方法）
+- `addTableCard` 改回用 `TABLE_CARD_WIDTH`
+- `loadFromChartData` 改回用 `forTable`（保留用户保存的 width，不强制加宽）
+- 保留 `computeRequiredWidth` / `forTableAutoWidth` 工具方法供未来使用
+
+#### 截断机制（drawTableCard 注释）
+```java
+int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
+if (maxCmtW > 10) {
+    g2d.drawString(truncateByWidth(commentText, maxCmtW, italicFm), cmtX, textY);
+}
+```
+- `truncateByWidth` 按字符增量检查 `fm.stringWidth(sb + "...") > maxWidth` 触发截断
+- 注释前缀 `/* ` 和后缀 ` */` 一起参与截断，截断后省略号
+
+#### 已知边界
+- 列名 / 类型未截断（如 `invoke_target : varchar(500)` 长度 ~155px，远小于 280，无问题）
+- 极端长列名（>30 字符）会溢出到卡外，暂未处理（实际场景少见）

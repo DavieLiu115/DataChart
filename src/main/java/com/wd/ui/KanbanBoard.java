@@ -1036,11 +1036,9 @@ public class KanbanBoard extends JPanel {
 		double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
 		height = Math.min(height, 400);
 
-		// 2026-08-01 修复"导出图片右边没显示完"：
-		// 旧版固定 280px 不够长字段（如 varchar(500)）用，sys_job 19 个字段溢出到卡外。
-		// 这里改为按列内容自动计算所需宽度（最小 280px）。
-		int requiredWidth = KanbanCard.computeRequiredWidth(info);
-		double cardWidth = requiredWidth;
+		// 2026-08-01 改回固定宽度：所有表格卡片统一宽度，注释过长按宽度截断 + 省略号
+		// （之前 21 节按需加宽会让不同表宽度不一致，且注释过长也不会触发 truncateByWidth）
+		double cardWidth = TABLE_CARD_WIDTH;
 
 		double x;
 		double y;
@@ -1060,7 +1058,7 @@ public class KanbanBoard extends JPanel {
 				+ ", 拖放屏幕点=" + (dropPoint == null ? "null" : dropPoint.x + "," + dropPoint.y)
 				+ ", 卡片画板坐标=(" + (int) x + "," + (int) y + ")"
 				+ ", 卡片尺寸=" + (int) cardWidth + "x" + (int) height
-				+ " (autoWidth=" + requiredWidth + ")"
+				+ " (fixedWidth)"
 				+ ", 缩放=" + viewport.getZoomFactor());
 
 		KanbanCard card = KanbanCard.forTable(info.getId(), info,
@@ -1254,13 +1252,10 @@ public class KanbanBoard extends JPanel {
 		cards.clear();
 		for (ChartData.TableCardModel model : data.getTables()) {
 			TableInfo info = BoardPersistence.resolveTableInfo(model, project);
-			// 2026-08-01 修复"导出图片右边没显示完"：从持久化恢复时，
-			// 若保存的 width < 当前表所需宽度（远程数据库表结构更新会导致），
-			// 自动加宽，避免导出图被裁切。模型对象 model 不修改（保留原始尺寸）。
-			double savedWidth = model.getWidth();
-			double height = model.getHeight();
-			KanbanCard card = KanbanCard.forTableAutoWidth(info.getId(), info,
-					model.getX(), model.getY(), savedWidth, height);
+			// 2026-08-01 改回固定宽度：恢复时用保存的 width（用户拖过的尺寸），
+			// 注释过长按宽度截断 + 省略号
+			KanbanCard card = KanbanCard.forTable(info.getId(), info,
+					model.getX(), model.getY(), model.getWidth(), model.getHeight());
 			if (model.getHighlightedRows() != null) {
 				for (Integer row : model.getHighlightedRows()) {
 					if (row != null) {
