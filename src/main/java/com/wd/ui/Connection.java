@@ -155,16 +155,24 @@ public class Connection {
 		g2d.draw(new Line2D.Double(leadEndX, leadEndY,
 				targetPoint.getX(), targetPoint.getY()));
 
-		// 在源/目标端点处画"鱼眼"/"透镜"形状（关系端点标识），用与线相同的颜色
-		// 由于端点前一段是水平的，形状沿连线方向横向延伸
-		// 形状中心向外偏移 = 远离卡片：sourcePoint 在源卡右边 → 向右偏移；targetPoint 在目标卡左边 → 向左偏移
-		// 偏移方向与连接方向无关（源/目标点的几何位置就决定"外侧"）
-		drawEndpointShape(g2d, sourcePoint, +1, lineColor);
-		drawEndpointShape(g2d, targetPoint, -1, lineColor);
+		// 根据 relationType 判断源端（source）和目标端（target）是否为"多"端：
+		// ONE_TO_ONE: 源 1, 目标 1 -> 都不画三叉（直线）
+		// ONE_TO_MANY: 源 1, 目标 多 -> 源不画三叉，目标画三叉
+		// MANY_TO_ONE: 源 多, 目标 1 -> 源画三叉，目标不画三叉
+		// MANY_TO_MANY / UNKNOWN: 源 多, 目标 多 -> 两端都画三叉
+		boolean sourceIsMany = relationType == RelationType.MANY_TO_ONE || relationType == RelationType.MANY_TO_MANY || relationType == RelationType.UNKNOWN;
+		boolean targetIsMany = relationType == RelationType.ONE_TO_MANY || relationType == RelationType.MANY_TO_MANY || relationType == RelationType.UNKNOWN;
+
+		if (sourceIsMany) {
+			drawEndpointShape(g2d, sourcePoint, +1, lineColor);
+		}
+		if (targetIsMany) {
+			drawEndpointShape(g2d, targetPoint, -1, lineColor);
+		}
 	}
 
 	/**
-	 * 在端点处绘制"三叉/鸟爪"(Crow's foot)分叉线。
+	 * 在端点处绘制"三叉/鸟爪"(Crow's foot)分叉线（代表"多"的一端）。
 	 *
 	 * <p>形状说明：</p>
 	 * <ul>
