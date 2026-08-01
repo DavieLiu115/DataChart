@@ -1,5 +1,8 @@
 package com.wd.ui;
 
+import com.intellij.notification.Notification;
+import com.intellij.notification.NotificationType;
+import com.intellij.notification.Notifications;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
@@ -10,12 +13,17 @@ import com.alibaba.fastjson.JSON;
 import java.awt.BorderLayout;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.io.File;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JFileChooser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.border.MatteBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -47,6 +55,12 @@ public class DataChartView extends DialogWrapper {
 
 	/** 退出全屏时需要恢复显示的工具栏组件引用 */
 	private final java.util.List<java.awt.Component> hiddenOnFullScreen = new java.util.ArrayList<>();
+
+	/**
+	 * 基础文件名（不含扩展名），用于导出 PDF / 图片的默认文件名。
+	 * 由 {@code DataChartEditor} 注入，未注入时使用 "datachart"。
+	 */
+	private String baseFileName = "datachart";
 
 	public DataChartView(@Nullable Project project) {
 		super(project);
@@ -83,6 +97,110 @@ public class DataChartView extends DialogWrapper {
 			fullScreamButton.setToolTipText("进入全屏模式");
 			fullScreamButton.addActionListener(e -> toggleFullScreen());
 		}
+		if (exportPDFButton != null) {
+			exportPDFButton.setToolTipText("导出为 PDF 文件");
+			exportPDFButton.addActionListener(e -> exportAsPdf());
+		}
+		if (exportPictureButton != null) {
+			exportPictureButton.setToolTipText("导出为图片（JPG）");
+			exportPictureButton.addActionListener(e -> exportAsImage());
+		}
+	}
+
+	/**
+	 * 生成导出默认文件名：基础名 + yyyyMMdd_HHmmss
+	 *
+	 * <p>例如 "schema_20260801_153012"。</p>
+	 */
+	private String generateDefaultFileName(String extension) {
+		SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd_HHmmss");
+		return baseFileName + "_" + sdf.format(new Date()) + "." + extension;
+	}
+
+	/**
+	 * 导出当前画板为 PDF
+	 *
+	 * <p>弹文件保存对话框，默认文件名 = 当前 datachart 文件名 + yyyyMMdd_HHmmss.pdf。
+	 * 无卡片时给出提示，不弹文件框。</p>
+	 */
+	private void exportAsPdf() {
+		if (kanbanBoard == null) {
+			return;
+		}
+		if (kanbanBoard.getCards() == null || kanbanBoard.getCards().isEmpty()) {
+			showInfoNotification("导出失败", "画板为空，无内容可导出");
+			return;
+		}
+		JFileChooser chooser = new JFileChooser();
+		chooser.setDialogTitle("导出为 PDF");
+		chooser.setFileFilter(new FileNameExtensionFilter("PDF 文件 (*.pdf)", "pdf"));
+		chooser.setSelectedFile(new File(generateDefaultFileName("pdf")));
+
+		if (chooser.showSaveDialog(rootPanel) == JFileChooser.APPROVE_OPTION) {
+			File file = chooser.getSelectedFile();
+			if (file.getName().toLowerCase().endsWith(".pdf")) {
+				// 用户已经写了 .pdf，直接用
+			} else {
+				file = new File(file.getParentFile(), file.getName() + ".pdf");
+			}
+			boolean ok = kanbanBoard.exportToPdf(file);
+			if (ok) {
+				showInfoNotification("导出成功", "PDF 已保存到：" + file.getAbsolutePath());
+			} else {
+				showErrorNotification("导出失败", "保存 PDF 失败，请查看日志");
+			}
+		}
+	}
+
+	/**
+	 * 导出当前画板为图片（JPG）
+	 *
+	 * <p>默认文件名 = 当前 datachart 文件名 + yyyyMMdd_HHmmss.jpg。</p>
+	 */
+	private void exportAsImage() {
+		if (kanbanBoard == null) {
+			return;
+		}
+		if (kanbanBoard.getCards() == null || kanbanBoard.getCards().isEmpty()) {
+			showInfoNotification("导出失败", "画板为空，无内容可导出");
+			return;
+		}
+		JFileChooser chooser = new JFileChooser();
+		chooser.setDialogTitle("导出为图片");
+		chooser.setFileFilter(new FileNameExtensionFilter("JPG 图片 (*.jpg)", "jpg", "jpeg"));
+		chooser.setSelectedFile(new File(generateDefaultFileName("jpg")));
+
+		if (chooser.showSaveDialog(rootPanel) == JFileChooser.APPROVE_OPTION) {
+			File file = chooser.getSelectedFile();
+			String lower = file.getName().toLowerCase();
+			if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+				// 用户已带后缀
+			} else {
+				file = new File(file.getParentFile(), file.getName() + ".jpg");
+			}
+			boolean ok = kanbanBoard.exportToImage(file, "jpg", 1.0);
+			if (ok) {
+				showInfoNotification("导出成功", "图片已保存到：" + file.getAbsolutePath());
+			} else {
+				showErrorNotification("导出失败", "保存图片失败，请查看日志");
+			}
+		}
+	}
+
+	/**
+	 * 显示 Info 通知
+	 */
+	private void showInfoNotification(String title, String content) {
+		Notifications.Bus.notify(new Notification(
+				"DataChart", title, content, NotificationType.INFORMATION));
+	}
+
+	/**
+	 * 显示 Error 通知
+	 */
+	private void showErrorNotification(String title, String content) {
+		Notifications.Bus.notify(new Notification(
+				"DataChart", title, content, NotificationType.ERROR));
 	}
 
 	/**
@@ -189,6 +307,25 @@ public class DataChartView extends DialogWrapper {
 	 */
 	public void setSaveListener(Runnable listener) {
 		this.saveListener = listener;
+	}
+
+	/**
+	 * 设置基础文件名（用于导出 PDF / 图片的默认文件名）
+	 *
+	 * <p>由 {@code DataChartEditor} 在初始化时调用，传入当前 .datachart 文件名（不含扩展名）。
+	 * 未调用时使用 "datachart"。</p>
+	 */
+	public void setBaseFileName(String name) {
+		if (name != null && !name.isEmpty()) {
+			this.baseFileName = name;
+		}
+	}
+
+	/**
+	 * 获取当前基础文件名（导出默认文件名用）
+	 */
+	public String getBaseFileName() {
+		return baseFileName;
 	}
 
 	/**

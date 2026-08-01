@@ -5,6 +5,12 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
 import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
+import com.itextpdf.awt.DefaultFontMapper;
+import com.itextpdf.awt.PdfGraphics2D;
+import com.itextpdf.text.Document;
+import com.itextpdf.text.pdf.BaseFont;
+import com.itextpdf.text.pdf.PdfContentByte;
+import com.itextpdf.text.pdf.PdfWriter;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableDropHandler;
 import com.wd.db.TableInfo;
@@ -15,6 +21,7 @@ import com.wd.model.RelationType;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Point;
@@ -32,6 +39,9 @@ import java.awt.geom.AffineTransform;
 import java.awt.geom.Line2D;
 import java.awt.geom.Point2D;
 import java.awt.geom.Rectangle2D;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -39,6 +49,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 
 /**
@@ -1051,6 +1062,256 @@ public class KanbanBoard extends JPanel {
 
 	public double getZoomFactor() {
 		return zoomFactor;
+	}
+
+	/**
+	 * 计算所有卡片（含所有 columns / 阴影）的完整包围盒
+	 *
+	 * <p>无卡片时返回面板当前大小（与 DataHelper 行为一致）。
+	 * 包围盒在画板坐标系下，外加 40px padding 防止卡片阴影被裁切。</p>
+	 */
+	public Rectangle2D calculateTotalBounds() {
+		if (cards.isEmpty()) {
+			return new Rectangle2D.Double(0, 0,
+					Math.max(1, getWidth()), Math.max(1, getHeight()));
+		}
+		double minX = Double.POSITIVE_INFINITY;
+		double minY = Double.POSITIVE_INFINITY;
+		double maxX = Double.NEGATIVE_INFINITY;
+		double maxY = Double.NEGATIVE_INFINITY;
+		for (KanbanCard card : cards) {
+			Rectangle2D b = card.getBounds();
+			if (b.getX() < minX) {
+				minX = b.getX();
+			}
+			if (b.getY() < minY) {
+				minY = b.getY();
+			}
+			if (b.getX() + b.getWidth() > maxX) {
+				maxX = b.getX() + b.getWidth();
+			}
+			if (b.getY() + b.getHeight() > maxY) {
+				maxY = b.getY() + b.getHeight();
+			}
+		}
+		int padding = 40;
+		return new Rectangle2D.Double(minX - padding, minY - padding,
+				(maxX - minX) + 2 * padding, (maxY - minY) + 2 * padding);
+	}
+
+	/**
+	 * 导出用绘制方法：把画板内容绘制到传入的 Graphics2D，不包含屏幕坐标的对齐辅助线 / tooltip
+	 *
+	 * <p>导出时不需要应用 {@code transform}（zoomFactor 视为 1.0），按卡片合并包围盒
+	 * 平移 g2d，使 (minX, minY) 落到 (0, 0) 位置。</p>
+	 *
+	 * @param g2d       目标 Graphics2D（来自 BufferedImage 或 PdfGraphics2D）
+	 * @param exportArea 导出区域（来自 {@link #calculateTotalBounds()}）
+	 * @param dark      是否深色主题
+	 */
+	public void paintForExport(Graphics2D g2d, Rectangle2D exportArea, boolean dark) {
+		// 渲染提示
+		g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+		g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+		g2d.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+		g2d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
+
+		double minX = exportArea.getX();
+		double minY = exportArea.getY();
+
+		// 1. 绘制背景（不透明，避免 PDF 中出现透明）
+		g2d.setColor(backgroundColor);
+		g2d.fillRect((int) minX, (int) minY,
+				(int) exportArea.getWidth(), (int) exportArea.getHeight());
+
+		// 2. 平移使 (minX, minY) 到 (0, 0)
+		g2d.translate(-minX, -minY);
+
+		// 3. 绘制网格
+		if (showGrid) {
+			drawGrid(g2d);
+		}
+
+		// 4. 绘制连线
+		for (Connection conn : connections) {
+			conn.draw(g2d);
+		}
+
+		// 5. 绘制所有卡片
+		Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = computeLinkedRows();
+		refreshRelatedRows();
+		for (KanbanCard c : cards) {
+			c.clearActiveRowColors();
+		}
+		if (activeHighlightCard != null && activeHighlightRow >= 0) {
+			activeHighlightCard.setActiveRowColor(activeHighlightRow, RELATED_ROW_COLOR);
+		}
+		for (String key : relatedRowKeys) {
+			RelatedRowPos rk = parseRelatedKeyById(key);
+			if (rk != null) {
+				rk.card.setActiveRowColor(rk.row, RELATED_ROW_COLOR);
+			}
+		}
+		for (KanbanCard card : cards) {
+			boolean isSelected = (card == selectedCard);
+			card.setSelected(isSelected);
+			Map<Integer, Color> merged = new HashMap<>(
+					linkedRowsCache.getOrDefault(card, Collections.emptyMap()));
+			for (String key : relatedRowKeys) {
+				RelatedRowPos rk = parseRelatedKeyById(key);
+				if (rk != null && rk.card == card) {
+					merged.put(rk.row, RELATED_ROW_COLOR);
+				}
+			}
+			card.draw(g2d, dark, merged);
+		}
+	}
+
+	/**
+	 * 导出当前画板为 PDF
+	 *
+	 * <p>PDF 页面大小 = 卡片合并包围盒 + 40px padding。中文用 STSong-Light 字体
+	 * （参考 DataHelper 实现）。无卡片时返回 false 让上层给出提示。</p>
+	 *
+	 * @param file 目标 PDF 文件
+	 * @return 是否成功
+	 */
+	public boolean exportToPdf(File file) {
+		if (file == null) {
+			return false;
+		}
+		if (cards.isEmpty()) {
+			return false;
+		}
+		Rectangle2D exportArea = calculateTotalBounds();
+		float width = (float) exportArea.getWidth();
+		float height = (float) exportArea.getHeight();
+		// 防止 0 宽度
+		if (width <= 0) {
+			width = 800;
+		}
+		if (height <= 0) {
+			height = 600;
+		}
+
+		Document document = new Document(new com.itextpdf.text.Rectangle(width, height));
+		try {
+			PdfWriter writer = PdfWriter.getInstance(document, new FileOutputStream(file));
+			document.open();
+			PdfContentByte cb = writer.getDirectContent();
+
+			// 自定义字体映射器支持中文（参考 DataHelper）
+			DefaultFontMapper mapper = new DefaultFontMapper() {
+				@Override
+				public BaseFont awtToPdf(Font font) {
+					try {
+						// 优先 STSong-Light (iText Asian)
+						return BaseFont.createFont("STSong-Light", "UniGB-UCS2-H", BaseFont.NOT_EMBEDDED);
+					} catch (Exception e) {
+						try {
+							// 回退到系统宋体（Windows）
+							return BaseFont.createFont("C:/Windows/Fonts/simsun.ttc,0",
+									BaseFont.IDENTITY_H, BaseFont.NOT_EMBEDDED);
+						} catch (Exception ex) {
+							return super.awtToPdf(font);
+						}
+					}
+				}
+			};
+
+			Graphics2D g2 = new PdfGraphics2D(cb, width, height, mapper);
+			try {
+				paintForExport(g2, exportArea, isDarkTheme());
+			} finally {
+				g2.dispose();
+			}
+			document.close();
+			return true;
+		} catch (Exception ex) {
+			LOG.warn("Export PDF failed: " + ex.getMessage(), ex);
+			return false;
+		}
+	}
+
+	/**
+	 * 导出当前画板为图片（JPG / PNG）
+	 *
+	 * <p>无卡片时返回 false。图片大小 = 卡片合并包围盒 * scale，1.0 表示原始尺寸。
+	 * JPG 用高质量压缩（0.95f）。</p>
+	 *
+	 * @param file   目标图片文件
+	 * @param format "jpg" 或 "png"
+	 * @param scale  缩放倍数（1.0 = 原始）
+	 * @return 是否成功
+	 */
+	public boolean exportToImage(File file, String format, double scale) {
+		if (file == null || format == null) {
+			return false;
+		}
+		if (cards.isEmpty()) {
+			return false;
+		}
+		if (scale <= 0) {
+			scale = 1.0;
+		}
+
+		Rectangle2D exportArea = calculateTotalBounds();
+		int targetW = Math.max(1, (int) (exportArea.getWidth() * scale));
+		int targetH = Math.max(1, (int) (exportArea.getHeight() * scale));
+
+		// 内存管理：如果目标过大，自动降级 scale
+		long freeMemory = Runtime.getRuntime().maxMemory()
+				- Runtime.getRuntime().totalMemory() + Runtime.getRuntime().freeMemory();
+		long estimatedBytes = (long) targetW * targetH * 4L;
+		if (estimatedBytes > freeMemory * 0.6) {
+			double safetyScale = Math.sqrt((freeMemory * 0.5)
+					/ (exportArea.getWidth() * exportArea.getHeight() * 4));
+			scale = Math.min(scale, safetyScale);
+			if (scale < 0.1) {
+				scale = 0.1;
+			}
+			targetW = Math.max(1, (int) (exportArea.getWidth() * scale));
+			targetH = Math.max(1, (int) (exportArea.getHeight() * scale));
+			LOG.warn("Export area too large, scale auto-adjusted to " + scale);
+		}
+
+		// JPG 不支持透明，用 RGB；PNG 用 ARGB
+		int imageType = "png".equalsIgnoreCase(format)
+				? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB;
+		BufferedImage img = new BufferedImage(targetW, targetH, imageType);
+		Graphics2D g2 = img.createGraphics();
+		try {
+			paintForExport(g2, exportArea, isDarkTheme());
+		} finally {
+			g2.dispose();
+		}
+
+		try (FileOutputStream fos = new FileOutputStream(file)) {
+			// JPG 用 JPEGImageWriteParam 高质量压缩
+			if ("jpg".equalsIgnoreCase(format) || "jpeg".equalsIgnoreCase(format)) {
+				javax.imageio.ImageWriter writer = ImageIO.getImageWritersByFormatName("jpg").next();
+				try (javax.imageio.stream.ImageOutputStream ios =
+						ImageIO.createImageOutputStream(fos)) {
+					writer.setOutput(ios);
+					javax.imageio.plugins.jpeg.JPEGImageWriteParam jpegParams =
+							(javax.imageio.plugins.jpeg.JPEGImageWriteParam) writer.getDefaultWriteParam();
+					jpegParams.setCompressionMode(javax.imageio.ImageWriteParam.MODE_EXPLICIT);
+					jpegParams.setCompressionQuality(0.95f);
+					writer.write(null,
+							new javax.imageio.IIOImage(img, null, null), jpegParams);
+				} finally {
+					writer.dispose();
+				}
+			} else {
+				// PNG / 其它格式：直接 ImageIO.write
+				ImageIO.write(img, format, fos);
+			}
+			img.flush();
+			return true;
+		} catch (Exception ex) {
+			LOG.warn("Export image failed: " + ex.getMessage(), ex);
+			return false;
+		}
 	}
 
 	public List<KanbanCard> getCards() {

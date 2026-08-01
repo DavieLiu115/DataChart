@@ -49,6 +49,8 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 					dataView.setBoardChangeListener(() -> setModified(true));
 					// Command+S / Ctrl+S 保存
 					dataView.setSaveListener(this::saveDocument);
+					// 暴露当前文件名（用于导出 PDF / 图片的默认文件名）
+					dataView.setBaseFileName(resolveBaseFileName());
 					editorPanel.add(dataView.getRootComponent(), BorderLayout.CENTER);
 					initialized = true;
 					// 打开文件时加载已有内容
@@ -56,6 +58,19 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 				}
 			}
 		}
+	}
+
+	/**
+	 * 解析当前文件的基础名（用于导出 PDF / 图片默认文件名）
+	 *
+	 * <p>取 {@code file.getNameWithoutExtension()}，未保存（无 file）时返回 "datachart"。</p>
+	 */
+	private String resolveBaseFileName() {
+		if (file == null || file.getName().isEmpty()) {
+			return "datachart";
+		}
+		String name = file.getNameWithoutExtension();
+		return (name == null || name.isEmpty()) ? "datachart" : name;
 	}
 
 	/**
