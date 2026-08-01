@@ -150,6 +150,124 @@ public class KanbanCard {
 		return card;
 	}
 
+	/**
+	 * 表格卡片宽度最小值（保证至少能放下列名 + 短类型）。
+	 *
+	 * <p>2026-08-01 引入：用于 {@link #computeRequiredWidth(TableInfo)}。
+	 * 字段少的表（如 3-5 个字段）维持在 280px，字段多或内容长的表自动加宽。</p>
+	 */
+	private static final int TABLE_CARD_MIN_WIDTH = 280;
+
+	/**
+	 * 表格卡片最小宽度（公开常量，供 {@link KanbanBoard#addTableCard} 等外部使用）
+	 */
+	public static final int MIN_TABLE_CARD_WIDTH = TABLE_CARD_MIN_WIDTH;
+
+	/**
+	 * 计算容纳指定表所有列所需的最优宽度。
+	 *
+	 * <p>宽度组成：
+	 * <ul>
+	 *   <li>左侧 padding（10px）</li>
+	 *   <li>字段图标宽（16px + 间距 4px = 20px）</li>
+	 *   <li>列名 + " : " + 类型（columnFont 度量）</li>
+	 *   <li>列注释（italicCommentFont 度量） + 6px 间距</li>
+	 *   <li>右侧 padding（10px）</li>
+	 * </ul>
+	 * 同时考虑 header 行（表名 + 表注释）宽度。</p>
+	 *
+	 * <p>最后与 {@link #MIN_TABLE_CARD_WIDTH} 比较取最大，保证字段少的表不会过窄。</p>
+	 *
+	 * <p>实现：构造离屏 1×1 BufferedImage 拿到 FontMetrics，遍历所有列 + header，
+	 * 真实度量字体宽度（而不是估算字符数），避免中英文混排估算不准。</p>
+	 *
+	 * @param tableInfo 表元信息
+	 * @return 推荐宽度（最小 {@link #MIN_TABLE_CARD_WIDTH}）
+	 */
+	public static int computeRequiredWidth(TableInfo tableInfo) {
+		if (tableInfo == null) {
+			return MIN_TABLE_CARD_WIDTH;
+		}
+		// 离屏 FontMetrics
+		java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+				1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+		Graphics2D g = img.createGraphics();
+		try {
+			Font headerFont = new Font(Font.SANS_SERIF, Font.BOLD, 13);
+			Font italicHeaderFont = new Font(Font.SANS_SERIF, Font.ITALIC, 11);
+			Font columnFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
+			Font italicCommentFont = new Font(Font.SANS_SERIF, Font.ITALIC, 10);
+
+			FontMetrics headerFm = g.getFontMetrics(headerFont);
+			FontMetrics italicHeaderFm = g.getFontMetrics(italicHeaderFont);
+			FontMetrics colFm = g.getFontMetrics(columnFont);
+			FontMetrics italicFm = g.getFontMetrics(italicCommentFont);
+
+			int padding = 10;
+			int iconZone = 20; // 图标 16 + 间距 4
+			int headerIconZone = 18; // 图标 16 + 间距 2
+			int commentGap = 6;
+			int maxContent = 0;
+
+			// 1. header 行：表名 + 6px + "/* 注释 */"
+			String headerName = tableInfo.getName() == null ? "" : tableInfo.getName();
+			String headerComment = tableInfo.getComment();
+			int headerW = headerIconZone + headerFm.stringWidth(headerName);
+			if (headerComment != null && !headerComment.isEmpty()) {
+				String cmtText = "/* " + headerComment + " */";
+				headerW += commentGap + italicHeaderFm.stringWidth(cmtText);
+			}
+			maxContent = Math.max(maxContent, headerW);
+
+			// 2. 列行：列名 + " : " + 类型 + 6px + "/* 注释 */"
+			List<ColumnInfo> columns = tableInfo.getColumns();
+			if (columns != null) {
+				for (ColumnInfo col : columns) {
+					String name = col.getName() == null ? "" : col.getName();
+					String type = col.getType() == null ? "" : col.getType();
+					String nameAndSep = name + " : " + type;
+					int colW = iconZone + colFm.stringWidth(nameAndSep);
+					String comment = col.getComment();
+					if (comment != null && !comment.isEmpty()) {
+						String cmtText = "/* " + comment + " */";
+						colW += commentGap + italicFm.stringWidth(cmtText);
+					}
+					maxContent = Math.max(maxContent, colW);
+				}
+			}
+
+			// 3. 加上左右 padding
+			int totalW = maxContent + padding * 2;
+			return Math.max(MIN_TABLE_CARD_WIDTH, totalW);
+		} finally {
+			g.dispose();
+			img.flush();
+		}
+	}
+
+	/**
+	 * 构造方法（表格模式，自动按列内容计算最优宽度）
+	 *
+	 * <p>宽度 = max(实际列内容所需宽度, {@link #MIN_TABLE_CARD_WIDTH})。
+	 * 高度按行数计算后传入。如果 {@code explicitWidth} &gt; 实际需要宽度，
+	 * 用 {@code explicitWidth}（支持从持久化恢复时保留用户的尺寸）。</p>
+	 *
+	 * @param id            卡片 ID
+	 * @param tableInfo     表元信息
+	 * @param x             x 坐标
+	 * @param y             y 坐标
+	 * @param explicitWidth 显式指定宽度（0 表示自动）；非 0 时用较大值
+	 * @param h             高度
+	 */
+	public static KanbanCard forTableAutoWidth(String id, TableInfo tableInfo,
+			double x, double y, double explicitWidth, double h) {
+		int required = computeRequiredWidth(tableInfo);
+		double w = (explicitWidth <= 0)
+				? required
+				: Math.max(explicitWidth, required);
+		return forTable(id, tableInfo, x, y, w, h);
+	}
+
 	public String getId() {
 		return id;
 	}

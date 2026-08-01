@@ -1036,11 +1036,17 @@ public class KanbanBoard extends JPanel {
 		double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
 		height = Math.min(height, 400);
 
+		// 2026-08-01 修复"导出图片右边没显示完"：
+		// 旧版固定 280px 不够长字段（如 varchar(500)）用，sys_job 19 个字段溢出到卡外。
+		// 这里改为按列内容自动计算所需宽度（最小 280px）。
+		int requiredWidth = KanbanCard.computeRequiredWidth(info);
+		double cardWidth = requiredWidth;
+
 		double x;
 		double y;
 		if (dropPoint != null) {
 			Point2D boardPoint = viewport.transformPoint(dropPoint);
-			x = boardPoint.getX() - TABLE_CARD_WIDTH / 2;
+			x = boardPoint.getX() - cardWidth / 2;
 			y = boardPoint.getY() - height / 2;
 		} else {
 			x = 0;
@@ -1053,11 +1059,12 @@ public class KanbanBoard extends JPanel {
 				+ ", 字段数=" + info.getColumns().size()
 				+ ", 拖放屏幕点=" + (dropPoint == null ? "null" : dropPoint.x + "," + dropPoint.y)
 				+ ", 卡片画板坐标=(" + (int) x + "," + (int) y + ")"
-				+ ", 卡片尺寸=" + (int) TABLE_CARD_WIDTH + "x" + (int) height
+				+ ", 卡片尺寸=" + (int) cardWidth + "x" + (int) height
+				+ " (autoWidth=" + requiredWidth + ")"
 				+ ", 缩放=" + viewport.getZoomFactor());
 
 		KanbanCard card = KanbanCard.forTable(info.getId(), info,
-				x, y, TABLE_CARD_WIDTH, height);
+				x, y, cardWidth, height);
 		if (dropPoint != null) {
 			cards.add(card);
 			LOG.info("[看板] 卡片已添加，当前卡片总数=" + cards.size() + "，请求重绘");
@@ -1247,8 +1254,13 @@ public class KanbanBoard extends JPanel {
 		cards.clear();
 		for (ChartData.TableCardModel model : data.getTables()) {
 			TableInfo info = BoardPersistence.resolveTableInfo(model, project);
-			KanbanCard card = KanbanCard.forTable(info.getId(), info,
-					model.getX(), model.getY(), model.getWidth(), model.getHeight());
+			// 2026-08-01 修复"导出图片右边没显示完"：从持久化恢复时，
+			// 若保存的 width < 当前表所需宽度（远程数据库表结构更新会导致），
+			// 自动加宽，避免导出图被裁切。模型对象 model 不修改（保留原始尺寸）。
+			double savedWidth = model.getWidth();
+			double height = model.getHeight();
+			KanbanCard card = KanbanCard.forTableAutoWidth(info.getId(), info,
+					model.getX(), model.getY(), savedWidth, height);
 			if (model.getHighlightedRows() != null) {
 				for (Integer row : model.getHighlightedRows()) {
 					if (row != null) {

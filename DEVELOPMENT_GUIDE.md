@@ -309,3 +309,22 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - **强耦合渲染状态留在 KanbanBoard**：`paintComponent` / `paintForExport` / `drawGrid` / `drawCards` / 关联列高亮（`activeHighlightCard` / `relatedRowKeys` / `refreshRelatedRows` / `parseRelatedKeyById`）仍留在原类
 - **解耦用函数式接口回调**：FindCard / AddConnection / Runnable，模块之间不互相 import，只依赖 KanbanCard / Connection 等模型类
 - **KanbanBoard 变成"编排层"**：持有 viewport/searchModel，事件→调用模块方法→`notifyViewChanged()` + `repaint()`
+
+### 21. 表格卡片宽度自适应（2026-08-01 修复"导出图片右边没显示完"）
+根因：表格卡片宽度固定 280px，sys_job（19 字段，含 `invoke_target : varchar(500) /* 调用目标字符串 */`）字段名+类型+注释总长超过 280，draw 时写到 `bounds` 外面被 BufferedImage 裁剪。
+
+#### 修复
+- **`KanbanCard.computeRequiredWidth(TableInfo)`**（静态方法）：
+  - 离屏 1×1 BufferedImage 拿到真实 FontMetrics（不靠字符数估算）
+  - 遍历所有列 + header 行：`padding + 图标宽 + 列名 + " : " + 类型 + 6 + "/* 注释 */" + padding`
+  - 与 `MIN_TABLE_CARD_WIDTH=280` 取最大
+- **`KanbanCard.forTableAutoWidth(id, info, x, y, explicitWidth, h)`**（新静态工厂）：
+  - `width = max(computeRequiredWidth, explicitWidth)`，兼容旧持久化尺寸
+- **`KanbanBoard.addTableCard`** 调用 `KanbanCard.computeRequiredWidth(info)` 算实际宽度
+- **`KanbanBoard.loadFromChartData`** 用 `forTableAutoWidth` 代替 `forTable`，即使旧 JSON 里的 width=280 偏小也能自动加宽
+
+#### 注意事项
+- 必须在 `BufferedImage` 拿 FontMetrics（创建 Graphics2D 立即 dispose），不要在 paint 阶段才计算
+- 中英文混排：FontMetrics.stringWidth 真实测量比 `char.length() * 7` 估算精确
+- 高 DPI 场景下需要留意缩放（Mac Retina），但 FontMetrics 已感知系统 DPI
+- 用户拖动手动改的 width > computed 会被保留（适配"用户故意加宽"场景）
