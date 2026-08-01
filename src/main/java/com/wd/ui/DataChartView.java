@@ -334,6 +334,13 @@ public class DataChartView extends DialogWrapper {
 				kanbanBoard.clearSearch();
 			}
 			updateSearchStatusLabel();
+			// 打开文件后自动居中所有卡片（等价于点击 Focus 按钮），
+			// 延迟到组件布局完成后再执行，保证视口尺寸正确
+			javax.swing.SwingUtilities.invokeLater(() -> {
+				if (kanbanBoard != null) {
+					kanbanBoard.focusView();
+				}
+			});
 		} catch (Exception e) {
 			// 解析失败时忽略，保持空看板
 		}
