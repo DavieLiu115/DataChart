@@ -1341,49 +1341,30 @@ public class KanbanBoard extends JPanel {
 		}
 		cards.clear();
 
-		// 2026-08-01 修复"导出图片左边留白太多 + 右边被裁"：
-		// 旧 .datachart 文件保存的 cards 位置/尺寸是 chart 模式默认（50, 50, 200, 130），
-		// 这里强制归一化：
+		// 2026-08-01 改回保留位置策略：
+		// 25 节强制归一化位置到 (0, 0)+4 张/行平铺 → 破坏了用户拖动过的位置（用户反馈"位置变了"）
+		// 现在改为：保留 model.getX()/getY() 位置，**只修正尺寸**：
 		//   1. table card 宽度统一为 TABLE_CARD_WIDTH（280）
-		//   2. table card 高度按字段数计算（不再用 saved height）
-		//   3. 所有 card 位置归一化到最左 card 起点 x=0，按 (4 张/行) 自动平铺
-		// 这样 calculateTotalBounds 算的 exportArea 紧凑，左右对称留白 20px
-		java.util.List<TableInfo> resolvedInfos = new java.util.ArrayList<>();
-		java.util.List<java.util.Set<Integer>> highlightedRowsList = new java.util.ArrayList<>();
-		java.util.List<String> cardIds = new java.util.ArrayList<>();
+		//   2. 高度按字段数计算（不再用 saved height）
+		// 这样 calculateTotalBounds 用真实 bounds 算，导出图正确；同时保留用户布局意图
 		for (ChartData.TableCardModel model : data.getTables()) {
 			TableInfo info = BoardPersistence.resolveTableInfo(model, project);
-			resolvedInfos.add(info);
-			java.util.Set<Integer> highlighted = new java.util.HashSet<>();
-			if (model.getHighlightedRows() != null) {
-				highlighted.addAll(model.getHighlightedRows());
-			}
-			highlightedRowsList.add(highlighted);
-			cardIds.add(info.getId());
-		}
-
-		// 强制创建统一宽度 = TABLE_CARD_WIDTH、高度 = 按字段数计算
-		int maxPerRow = 4;
-		int idx = 0;
-		for (int i = 0; i < resolvedInfos.size(); i++) {
-			TableInfo info = resolvedInfos.get(i);
 			// 高度 = base + 行数 * 行高（上限 400）
 			int rowCount = Math.max(3, info.getColumns().size());
 			double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
 			height = Math.min(height, 400);
 
-			int col = i % maxPerRow;
-			int row = i / maxPerRow;
-			double x = col * (TABLE_CARD_WIDTH + CARD_HSPACE);
-			double y = row * (400 + CARD_VSPACE);  // 400 是简化估算每行高度
-
-			KanbanCard card = KanbanCard.forTable(cardIds.get(i), info,
-					x, y, TABLE_CARD_WIDTH, height);
-			for (Integer hr : highlightedRowsList.get(i)) {
-				card.addHighlightedRow(hr);
+			// 保留 model 的 x, y（用户拖动过的位置）
+			KanbanCard card = KanbanCard.forTable(info.getId(), info,
+					model.getX(), model.getY(), TABLE_CARD_WIDTH, height);
+			if (model.getHighlightedRows() != null) {
+				for (Integer row : model.getHighlightedRows()) {
+					if (row != null) {
+						card.addHighlightedRow(row);
+					}
+				}
 			}
 			cards.add(card);
-			idx++;
 		}
 
 		// 恢复连线

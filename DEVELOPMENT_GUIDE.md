@@ -412,3 +412,20 @@ if (maxCmtW > 10) {
 - `./gradlew compileJava --rerun-tasks` BUILD SUCCESSFUL
 - 0 lint 错误
 - 笔记：DEVELOPMENT_GUIDE.md 第 25 节
+
+### 26. loadFromChartData 改回保留位置（2026-08-01 用户反馈"位置变了"）
+#### 用户反馈
+- "关闭重新打开，就变成...这样了，为什么位置变了，应该保留之前的位置"
+- 25 节强制归一化位置到 (0, 0)+4 张/行平铺 → 关闭重开后用户拖动过的位置丢失
+
+#### 修复
+- **`loadFromChartData` 改回保留位置**：
+  - 保留 `model.getX()`, `model.getY()`（用户拖动过的位置）
+  - **只修正尺寸**：width = TABLE_CARD_WIDTH (280)，height 按字段数计算
+- 新 cards（`addTableCard`）起点 (0, 0)，**老 cards 保留位置**
+
+#### 设计原则（重要）
+- **位置属于用户意图**：必须保留，不能因修复其他问题破坏
+- **尺寸属于代码约束**：可以强制统一为合理值（TABLE_CARD_WIDTH）
+- **新数据用代码规则，老数据保留用户位置**——两者并存
+- exportArea 用 card.getBounds() 算，用户位置不变 → 导出图也跟着用户位置走
