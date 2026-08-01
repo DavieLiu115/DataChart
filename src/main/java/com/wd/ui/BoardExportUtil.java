@@ -33,10 +33,18 @@ public final class BoardExportUtil {
 	}
 
 	/**
+	 * 导出边距（画板坐标像素）。
+	 *
+	 * <p>2026-08-01 需求变更：图片 / PDF 导出统一保留 {@value}px 边距，
+	 * 避免内容紧贴图片边缘、视觉上不美观。</p>
+	 */
+	public static final int EXPORT_MARGIN = 20;
+
+	/**
 	 * 计算所有卡片（含阴影）的完整包围盒，用于导出范围。
 	 *
 	 * <p>无卡片时返回 {@code (0,0,1,1)} 最小尺寸。包围盒在画板坐标系下，
-	 * 采用"围绕内容中心"的对称 padding（4px，仅够容纳阴影偏移），保证四边留白均匀。</p>
+	 * 采用"围绕内容中心"的对称 padding（{@value #EXPORT_MARGIN}px），保证四边留白均匀。</p>
 	 *
 	 * @param cards 卡片列表
 	 * @return 导出包围盒（画板坐标）
@@ -64,8 +72,8 @@ public final class BoardExportUtil {
 				maxY = b.getY() + b.getHeight();
 			}
 		}
-		// 对称 padding：紧贴卡片，仅够容纳阴影偏移 +2，视觉上"居中紧凑"
-		int padding = 4;
+		// 对称 padding：围绕内容中心留出 20px 边距，图片 / PDF 导出通用
+		int padding = EXPORT_MARGIN;
 		double contentCenterX = (minX + maxX) / 2.0;
 		double contentCenterY = (minY + maxY) / 2.0;
 		double halfW = (maxX - minX) / 2.0 + padding;

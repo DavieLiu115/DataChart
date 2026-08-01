@@ -355,3 +355,17 @@ if (maxCmtW > 10) {
 #### 已知边界
 - 列名 / 类型未截断（如 `invoke_target : varchar(500)` 长度 ~155px，远小于 280，无问题）
 - 极端长列名（>30 字符）会溢出到卡外，暂未处理（实际场景少见）
+
+### 23. 导出边距 20px（2026-08-01）
+#### 需求
+- "图片，pdf 都给个 20px 的边距"
+
+#### 实现
+- `BoardExportUtil.EXPORT_MARGIN = 20`（画板坐标像素）
+- `calculateTotalBounds` 的对称 padding 从 `4` 改为 `EXPORT_MARGIN`
+- 图片 + PDF 共用 `calculateTotalBounds`，因此边距对两者同时生效
+- `paintForExport` 的 `fillRect(0,0,deviceW,deviceH)` 用设备坐标填充整个图像（含 20px 边距区域），边距显示为背景色，正确
+
+#### 说明
+- 20px > 卡片阴影偏移（约 2px），阴影不会被裁
+- 对称 padding 保证四边留白均匀（内容居中）
