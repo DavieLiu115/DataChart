@@ -356,7 +356,11 @@ public class DataChartView extends DialogWrapper {
 				}
 			});
 		} catch (Exception e) {
-			// 解析失败时忽略，保持空看板
+			// 解析失败：提示用户，避免静默丢数据（保留空看板）
+			com.intellij.openapi.diagnostic.Logger.getInstance(DataChartView.class)
+					.warn("loadFromJson 解析 .datachart 失败", e);
+			NotificationUtil.error("打开文件失败",
+					"无法解析该 .datachart 文件，已显示空看板。\n" + e.getMessage());
 		}
 	}
 

@@ -468,3 +468,18 @@ if (maxCmtW > 10) {
 - **尺寸属于代码约束**：可以强制统一为合理值（TABLE_CARD_WIDTH）
 - **新数据用代码规则，老数据保留用户位置**——两者并存
 - exportArea 用 card.getBounds() 算，用户位置不变 → 导出图也跟着用户位置走
+
+### 27. 性能/稳定性审查与修复（2026-08-03）
+
+对全项目做了 线程安全/内存泄漏/异步回调/执行性能/响应速度/运行效率/稳定性 七维审查，已修复项 + 待优化建议：
+
+#### 已修复
+- **`KanbanCard.getColumnNameRightX` 每次新建离屏 BufferedImage** → 复用懒加载 `getColumnFontMetricsCache()`（与 `getHeaderFontMetricsCache` 同模式），消除 hit-test 热路径反复创建/释放 Graphics 资源
+- **`DatabaseTableMetadataFetcher` 反射 Method 查找无缓存** → 新增 `METHOD_CACHE`（ConcurrentHashMap，key=`类名#方法名`）+ `findMethodByNameUncached`，`findMethodByName` 先查缓存
+- **`DataChartView.loadFromJson` 解析失败静默丢数据** → catch 里记录日志 + `NotificationUtil.error` 提示用户
+
+#### 待优化建议（架构级，未在本轮改动，防回归）
+- **`DataChartView extends DialogWrapper` 用错基类**（违反规范第 4 条）：应改为 `JPanel`/`SimpleToolWindowPanel`；当前作为 FileEditor 组件嵌入，DialogWrapper 会创建多余对话框窗口、增加泄漏风险。改动涉及 `.form` 绑定 + DialogWrapper 专属方法，建议单独安排
+- **`PluginIcons` 60+ 图标类加载全部 I/O**（违反规范第 5 条）：建议按需懒加载
+- **`KanbanBoard.paintComponent` 全量重绘**：`computeLinkedRows()`/`refreshRelatedRows()` 每次重绘都重算，拖拽高频时线性开销；建议连线不变时复用缓存
+- **`DatabaseTableMetadataFetcher.findDataSource/findTable` 每次全量遍历**：表多时开销大，建议数据源/表名短时缓存

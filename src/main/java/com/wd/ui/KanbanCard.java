@@ -671,11 +671,7 @@ public class KanbanCard {
 			return -1;
 		}
 		com.wd.db.ColumnInfo col = tableInfo.getColumns().get(rowIndex);
-		java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
-				1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
-		Graphics2D g = img.createGraphics();
-		FontMetrics colFm = g.getFontMetrics(columnFont);
-		g.dispose();
+		FontMetrics colFm = getColumnFontMetricsCache();
 		// 列文本起点 = bounds.getX() + padding + 20 (图标 16 + 间距 4)
 		double textStartX = bounds.getX() + padding + 20;
 		String nameAndSep = col.getName() + " : " + col.getType();
@@ -741,6 +737,22 @@ public class KanbanCard {
 			g.dispose();
 		}
 		return headerFontMetricsCache;
+	}
+
+	/**
+	 * column 字体度量（懒加载，避免 hit-test 热路径反复创建离屏 BufferedImage）
+	 */
+	private FontMetrics columnFontMetricsCache;
+
+	private FontMetrics getColumnFontMetricsCache() {
+		if (columnFontMetricsCache == null) {
+			java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(
+					1, 1, java.awt.image.BufferedImage.TYPE_INT_ARGB);
+			Graphics2D g = img.createGraphics();
+			columnFontMetricsCache = g.getFontMetrics(columnFont);
+			g.dispose();
+		}
+		return columnFontMetricsCache;
 	}
 
 	/**

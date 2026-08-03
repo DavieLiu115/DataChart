@@ -41,6 +41,13 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static boolean classesInitialized = false;
 	private static boolean classesAvailable = false;
 
+	/**
+	 * 方法查找缓存（类名 + 方法名 → Method），避免热路径反复反射遍历。
+	 * key = "类名.方法名"，按需填充。
+	 */
+	private static final java.util.concurrent.ConcurrentHashMap<String, java.lang.reflect.Method>
+			METHOD_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
 	@Override
 	public boolean isAvailable() {
 		return isDatabasePluginEnabled() && ensureClasses();
@@ -288,8 +295,22 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 		}
 	}
 
-	/** 按方法名查找方法（含父类/接口遍历，不校验参数类型） */
+	/** 按方法名查找方法（含父类/接口遍历，不校验参数类型），结果按 (类名, 方法名) 缓存 */
 	private static Method findMethodByName(Class<?> clazz, String method) {
+		String key = clazz.getName() + "#" + method;
+		java.lang.reflect.Method cached = METHOD_CACHE.get(key);
+		if (cached != null) {
+			return cached;
+		}
+		java.lang.reflect.Method found = findMethodByNameUncached(clazz, method);
+		if (found != null) {
+			METHOD_CACHE.put(key, found);
+		}
+		return found;
+	}
+
+	/** 实际查找方法（不缓存） */
+	private static java.lang.reflect.Method findMethodByNameUncached(Class<?> clazz, String method) {
 		try {
 			for (Method m : clazz.getMethods()) {
 				if (m.getName().equals(method)) {
