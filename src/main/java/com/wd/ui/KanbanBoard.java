@@ -169,8 +169,10 @@ public class KanbanBoard extends JPanel {
 	/** 关联列高亮颜色（选中某列时，与之有连线的另一列也用此色高亮） */
 	private static final Color RELATED_ROW_COLOR = new Color(0xFD9933);
 
-	/** 连线模式临时高亮颜色（半透明粉色，标识当前正在连的行） */
-	private static final Color CONNECTION_PREVIEW_COLOR = new Color(0xFFB6E1);
+	/** 连线模式临时预览颜色（2026-08-04 由粉色改为深灰色，浅色主题深灰 / 深色主题浅灰） */
+	private static final Color CONNECTION_PREVIEW_COLOR = new JBColor(
+			new Color(0x757575), // 浅色主题：深灰，清晰可见
+			new Color(0xAAAAAA)); // 深色主题：浅灰，避免与暗背景对比不足
 
 	/** 对齐辅助线颜色（深色主题下稍亮，浅色主题下稍深） */
 	private static final Color ALIGN_GUIDE_COLOR_LIGHT = new Color(0xFE9933);
@@ -1083,7 +1085,7 @@ public class KanbanBoard extends JPanel {
 		if (isConnecting && connectionSource != null && connectionCurrentPoint != null) {
 			Point2D sourcePoint = connectionSource.getRowRight(connectionSourceRow);
 			if (sourcePoint != null) {
-				g2d.setColor(Color.PINK);
+				g2d.setColor(CONNECTION_PREVIEW_COLOR);
 				g2d.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 				double dx = Math.abs(connectionCurrentPoint.getX() - sourcePoint.getX());
 				double ctrlX1 = sourcePoint.getX() + dx / 2.0;

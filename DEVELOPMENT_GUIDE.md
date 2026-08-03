@@ -615,8 +615,9 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - `mouseReleased` 建线分支恢复为 `addConnection(source, sourceRow, target, targetRow)`（走 palette）
 
 #### 设计原则（正确版）
-- **粉色（`CONNECTION_PREVIEW_COLOR`）只是拖拽过程临时色**，建线成功后必须用 palette 分配一个新颜色，让多条连线**视觉可区分**——这是 ER 图工具的基本要求
+- **预览色只是拖拽过程临时色**，建线成功后必须用 palette 分配一个新颜色，让多条连线**视觉可区分**——这是 ER 图工具的基本要求
 - **palette 循环分配**（`connectionColorIndex++ % palette.length`）保证每条新连线颜色不同
 - **加载文件恢复连线** / **编程方式建线** 也走 palette，保持视觉一致
 - 第 33 节修复（清源行用户选中）依然必要，但**清掉的应该是"激活高亮"而不是"连线本身的颜色"**——连线仍应保留 palette 区分
+- **预览色由粉色改为深灰（2026-08-04 用户反馈）**：`CONNECTION_PREVIEW_COLOR` 改为 `JBColor(浅色 #757575, 深色 #AAAAAA)`，预览连线绘制处（原 `Color.PINK`）也统一用它。避免粉色与 palette 中的粉紫/粉红系颜色混淆
 
