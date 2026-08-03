@@ -99,6 +99,40 @@ public final class BoardExportUtil {
 	}
 
 	/**
+	 * PDF 导出中文字体映射（按优先级回退）：
+	 * <ol>
+	 *   <li><b>iText Asian 中文字体（首选）</b>：{@code STSong-Light}，编码 {@code UniGB-UCS2-H}</li>
+	 *   <li><b>Windows 系统字体（兜底）</b>：{@code C:/Windows/Fonts/simsun.ttc,0}（宋体），编码 {@code IDENTITY_H}</li>
+	 *   <li><b>默认处理（都失败）</b>：调用 {@code super.awtToPdf(font)} 回退到 AWT 默认字体</li>
+	 * </ol>
+	 *
+	 * <p>优先用 iText 自带的 STSong-Light，若运行环境缺失 iText Asian 字体包，
+	 * 则退回到系统中的宋体（simsun.ttc），确保中文在 PDF 中正确显示。</p>
+	 *
+	 * @param font AWT 字体（无法创建时回退到默认映射）
+	 * @return 对应 PDF BaseFont
+	 */
+	private static com.itextpdf.text.pdf.BaseFont createCjkFont(java.awt.Font font) {
+		try {
+			// 1. iText Asian 内置中文字体（首选，跨平台，不依赖系统字体）
+			return com.itextpdf.text.pdf.BaseFont.createFont(
+					"STSong-Light", "UniGB-UCS2-H",
+					com.itextpdf.text.pdf.BaseFont.NOT_EMBEDDED);
+		} catch (Exception e) {
+			// 2. Windows 宋体兜底（iText Asian 缺失或加载失败时）
+			try {
+				return com.itextpdf.text.pdf.BaseFont.createFont(
+						"C:/Windows/Fonts/simsun.ttc,0",
+						com.itextpdf.text.pdf.BaseFont.IDENTITY_H,
+						com.itextpdf.text.pdf.BaseFont.NOT_EMBEDDED);
+			} catch (Exception ex) {
+				// 3. 都失败：回退到 AWT 默认字体映射
+				return new com.itextpdf.awt.DefaultFontMapper().awtToPdf(font);
+			}
+		}
+	}
+
+	/**
 	 * 导出当前看板为 PDF。
 	 *
 	 * <p>PDF 页面大小 = 卡片合并包围盒 + 4px padding。中文用 STSong-Light 字体
@@ -135,24 +169,11 @@ public final class BoardExportUtil {
 			document.open();
 			com.itextpdf.text.pdf.PdfContentByte cb = writer.getDirectContent();
 
-			// 自定义字体映射器支持中文（参考 DataHelper）
+			// 自定义字体映射器支持中文（按 createCjkFont 的优先级回退）
 			com.itextpdf.awt.DefaultFontMapper mapper = new com.itextpdf.awt.DefaultFontMapper() {
 				@Override
 				public com.itextpdf.text.pdf.BaseFont awtToPdf(java.awt.Font font) {
-					try {
-						return com.itextpdf.text.pdf.BaseFont.createFont(
-								"STSong-Light", "UniGB-UCS2-H",
-								com.itextpdf.text.pdf.BaseFont.NOT_EMBEDDED);
-					} catch (Exception e) {
-						try {
-							return com.itextpdf.text.pdf.BaseFont.createFont(
-									"C:/Windows/Fonts/simsun.ttc,0",
-									com.itextpdf.text.pdf.BaseFont.IDENTITY_H,
-									com.itextpdf.text.pdf.BaseFont.NOT_EMBEDDED);
-						} catch (Exception ex) {
-							return super.awtToPdf(font);
-						}
-					}
+					return createCjkFont(font);
 				}
 			};
 

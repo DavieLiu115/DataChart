@@ -570,3 +570,16 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - **兼容快速点击场景**：没 hover 过任何有效目标（按一下就松）才用松手点判断
 - **避免自连**：判断 `targetCard != connectionSource` 双保险（hover 阶段和松手阶段都校验）
 
+### 32. PDF 导出中文字体回退（2026-08-04 整理抽取）
+`BoardExportUtil.createCjkFont(font)` 私有静态方法，按优先级回退（供 `exportToPdf` 的 `DefaultFontMapper.awtToPdf` 调用）：
+
+1. **iText Asian 中文字体（首选）**：`STSong-Light`，编码 `UniGB-UCS2-H`，`NOT_EMBEDDED`
+   - 跨平台、内置，不依赖系统字体
+2. **Windows 系统字体（兜底）**：`C:/Windows/Fonts/simsun.ttc,0`（宋体），编码 `IDENTITY_H`，`NOT_EMBEDDED`
+   - 仅在 iText Asian 缺失或加载失败时使用
+3. **默认处理（都失败）**：`new DefaultFontMapper().awtToPdf(font)` 回退到 AWT 默认字体
+
+- **iText Asian 字体 key**：`STSong-Light`（配合编码 `UniGB-UCS2-H`）是 `itext-asian` 依赖提供的 CID 字体
+- **系统宋体 key**：`simsun.ttc,0`（`/ttc` 字体集合取第 0 个 face）需配合 `IDENTITY_H`（Unicode 编码）使用
+- **嵌入级别统一 `NOT_EMBEDDED`**：STSong-Light 是 CID 字体通常不嵌入；simsun 不嵌入则依赖查看方机器字体，如担心跨机显示可改 `EMBEDDED`（会增加文件体积）
+
