@@ -419,6 +419,7 @@ public class KanbanBoard extends JPanel {
 					}
 					if (targetCard != null && targetCard != connectionSource
 							&& targetRow >= 0) {
+						// 建线后用 palette 分配新颜色，让多条连线视觉可区分
 						addConnection(connectionSource, connectionSourceRow,
 								targetCard, targetRow);
 					}

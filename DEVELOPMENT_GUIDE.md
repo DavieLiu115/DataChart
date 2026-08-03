@@ -605,3 +605,18 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
   - 拖拽建线 → `clearUserRowSelection`（强制清掉，避免遗留）
 - **不入 `repaint`**：`clearUserRowSelection` 不主动重绘，由调用方（升级分支/起手分支）按需刷新，避免和现有 `repaint()` 逻辑重复或乱序
 
+### 34. 连线建线后用 palette 分配颜色（2026-08-04 撤销"沿用预览色"误改）
+#### 历史与撤销
+第一次修复（2026-08-04 上午）误以为"建线后整条线突变成 palette 颜色是 bug"，尝试让 `addConnection` 接收 `overrideColor` 并把拖拽预览的粉色作为新连线 color——结果用户反馈"怎么能一直粉色呢？连一次换一个颜色啊"。
+
+**撤销内容**：
+- 删掉 `addConnection(source, sourceRow, target, targetRow, relationType, Color overrideColor)` 6 参重载
+- 删掉私有方法 `capturePreviewColor(card, rowIndex)`
+- `mouseReleased` 建线分支恢复为 `addConnection(source, sourceRow, target, targetRow)`（走 palette）
+
+#### 设计原则（正确版）
+- **粉色（`CONNECTION_PREVIEW_COLOR`）只是拖拽过程临时色**，建线成功后必须用 palette 分配一个新颜色，让多条连线**视觉可区分**——这是 ER 图工具的基本要求
+- **palette 循环分配**（`connectionColorIndex++ % palette.length`）保证每条新连线颜色不同
+- **加载文件恢复连线** / **编程方式建线** 也走 palette，保持视觉一致
+- 第 33 节修复（清源行用户选中）依然必要，但**清掉的应该是"激活高亮"而不是"连线本身的颜色"**——连线仍应保留 palette 区分
+
