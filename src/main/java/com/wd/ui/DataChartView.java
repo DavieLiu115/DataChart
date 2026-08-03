@@ -71,7 +71,7 @@ public class DataChartView extends DialogWrapper {
 		exportPDFButton.setIcon(PluginIcons.export);
 		exportPictureButton.setIcon(PluginIcons.image);
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
-		focusButton.setIcon(PluginIcons.reset);
+		focusButton.setIcon(PluginIcons.autoLayout);
 		focusButton.setText("Focus");
 		// 初次构造后立即刷新一次 zoom 显示（100%）
 		updateSearchStatusLabel();

@@ -12,14 +12,20 @@ public class ChartRelation {
 	/** 源表卡片 ID */
 	private String fromCardId;
 
-	/** 源表连接字段 */
+	/** 源表连接字段（列 index，字符串形式；删除列后会错位，优先用 {@link #fromColumnName}） */
 	private String fromColumn;
+
+	/** 源表连接字段列名（2026-08-03 新增，删除列后仍能准确定位） */
+	private String fromColumnName;
 
 	/** 目标表卡片 ID */
 	private String toCardId;
 
-	/** 目标表连接字段 */
+	/** 目标表连接字段（列 index，字符串形式；删除列后会错位，优先用 {@link #toColumnName}） */
 	private String toColumn;
+
+	/** 目标表连接字段列名（2026-08-03 新增，删除列后仍能准确定位） */
+	private String toColumnName;
 
 	/** 关系类型 */
 	private RelationType relationType;
@@ -55,6 +61,14 @@ public class ChartRelation {
 		this.fromColumn = fromColumn;
 	}
 
+	public String getFromColumnName() {
+		return fromColumnName;
+	}
+
+	public void setFromColumnName(String fromColumnName) {
+		this.fromColumnName = fromColumnName;
+	}
+
 	public String getToCardId() {
 		return toCardId;
 	}
@@ -69,6 +83,14 @@ public class ChartRelation {
 
 	public void setToColumn(String toColumn) {
 		this.toColumn = toColumn;
+	}
+
+	public String getToColumnName() {
+		return toColumnName;
+	}
+
+	public void setToColumnName(String toColumnName) {
+		this.toColumnName = toColumnName;
 	}
 
 	public RelationType getRelationType() {

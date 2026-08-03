@@ -96,6 +96,10 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - `ChartRelation`：表连接（from/to 卡片 ID + 字段 + relationType）
 - `RelationType`：ONE_TO_ONE/ONE_TO_MANY/MANY_TO_ONE/MANY_TO_MANY/UNKNOWN
 - 计划用 fastjson（已在依赖中）序列化/反序列化
+- **连线列定位（2026-08-03）**：`fromColumn`/`toColumn` 存列 **index**（字符串数字，删除列后会错位）；新增 `fromColumnName`/`toColumnName` 存**列名**
+  - 保存：`BoardPersistence.toChartData` 通过 `resolveColumnName` 从行 index 取列名一并写入
+  - 加载：`loadFromChartData` 用 `resolveRowIndex` **优先按列名定位**真实 index，找不到（旧文件无列名）才回退旧 index → 向后兼容旧 .datachart
+  - 新保存的文件即使之后增删列，只要列名还在，连线仍准确落在该列
 
 ### 14. ER 图交互规范（ER-style interaction）
 

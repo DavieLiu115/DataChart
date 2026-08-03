@@ -54,15 +54,32 @@ public final class BoardPersistence {
 			model.setHighlightedRows(new java.util.ArrayList<>(card.getHighlightedRows()));
 			data.getTables().add(model);
 		}
-		// 保存连线
+		// 保存连线（同时写入列 index 和列名，列名用于删除列后仍准确定位）
 		for (Connection conn : connections) {
 			ChartRelation rel = new ChartRelation(
 					conn.getSource().getId(), Integer.toString(conn.getSourceRow()),
 					conn.getTarget().getId(), Integer.toString(conn.getTargetRow()),
 					conn.getRelationType());
+			rel.setFromColumnName(resolveColumnName(conn.getSource(), conn.getSourceRow()));
+			rel.setToColumnName(resolveColumnName(conn.getTarget(), conn.getTargetRow()));
 			data.getRelations().add(rel);
 		}
 		return data;
+	}
+
+	/**
+	 * 取指定卡片某行的列名（用于持久化，删除列后仍可定位）；行越界或非表格卡返回 null。
+	 */
+	private static String resolveColumnName(KanbanCard card, int row) {
+		if (card == null || row < 0) {
+			return null;
+		}
+		TableInfo info = card.getTableInfo();
+		if (info == null || info.getColumns() == null
+				|| row >= info.getColumns().size()) {
+			return null;
+		}
+		return info.getColumns().get(row).getName();
 	}
 
 	/**
@@ -84,8 +101,9 @@ public final class BoardPersistence {
 			if (src == null || tgt == null) {
 				continue;
 			}
-			int srcRow = parseRowIndex(rel.getFromColumn());
-			int tgtRow = parseRowIndex(rel.getToColumn());
+			// 优先用列名定位（删除列后仍准确）；旧文件无列名时回退用列 index
+			int srcRow = resolveRowIndex(src, rel.getFromColumnName(), rel.getFromColumn());
+			int tgtRow = resolveRowIndex(tgt, rel.getToColumnName(), rel.getToColumn());
 			if (srcRow < 0 || tgtRow < 0) {
 				continue;
 			}
@@ -93,6 +111,30 @@ public final class BoardPersistence {
 					? RelationType.UNKNOWN : rel.getRelationType();
 			addConnection.add(src, srcRow, tgt, tgtRow, type);
 		}
+	}
+
+	/**
+	 * 解析某条连线在指定卡片上对应的行 index。
+	 *
+	 * <p>优先级：</p>
+	 * <ol>
+	 *   <li>若提供了 {@code columnName} 且卡片中存在该列名 → 返回该列 index（列被增删后仍准确）</li>
+	 *   <li>否则回退用 {@code columnIndexStr}（旧版本存的列 index）解析</li>
+	 *   <li>都失败返回 -1</li>
+	 * </ol>
+	 */
+	private static int resolveRowIndex(KanbanCard card, String columnName, String columnIndexStr) {
+		if (columnName != null && !columnName.isEmpty() && card != null) {
+			TableInfo info = card.getTableInfo();
+			if (info != null && info.getColumns() != null) {
+				for (int i = 0; i < info.getColumns().size(); i++) {
+					if (columnName.equals(info.getColumns().get(i).getName())) {
+						return i;
+					}
+				}
+			}
+		}
+		return parseRowIndex(columnIndexStr);
 	}
 
 	/**
