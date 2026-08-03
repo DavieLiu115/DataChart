@@ -25,6 +25,8 @@
     <!-- Database 插件是 Ultimate 版才有，声明为可选依赖，运行时动态检查 -->
     <depends optional="true">com.intellij.database</depends>
 
+    <idea-version since-build="223"/>
+
     <!-- Extension points defined by the plugin.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-extension-points.html -->
     <extensions defaultExtensionNs="com.intellij">
