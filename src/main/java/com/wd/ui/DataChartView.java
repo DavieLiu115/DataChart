@@ -515,6 +515,9 @@ public class DataChartView extends DialogWrapper {
 
 	@Override
 	public void dispose() {
+		if (kanbanBoard != null) {
+			kanbanBoard.dispose();
+		}
 		super.dispose();
 	}
 }

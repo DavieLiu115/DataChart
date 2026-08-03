@@ -478,8 +478,11 @@ if (maxCmtW > 10) {
 - **`DatabaseTableMetadataFetcher` 反射 Method 查找无缓存** → 新增 `METHOD_CACHE`（ConcurrentHashMap，key=`类名#方法名`）+ `findMethodByNameUncached`，`findMethodByName` 先查缓存
 - **`DataChartView.loadFromJson` 解析失败静默丢数据** → catch 里记录日志 + `NotificationUtil.error` 提示用户
 
-#### 待优化建议（架构级，未在本轮改动，防回归）
-- **`DataChartView extends DialogWrapper` 用错基类**（违反规范第 4 条）：应改为 `JPanel`/`SimpleToolWindowPanel`；当前作为 FileEditor 组件嵌入，DialogWrapper 会创建多余对话框窗口、增加泄漏风险。改动涉及 `.form` 绑定 + DialogWrapper 专属方法，建议单独安排
-- **`PluginIcons` 60+ 图标类加载全部 I/O**（违反规范第 5 条）：建议按需懒加载
-- **`KanbanBoard.paintComponent` 全量重绘**：`computeLinkedRows()`/`refreshRelatedRows()` 每次重绘都重算，拖拽高频时线性开销；建议连线不变时复用缓存
-- **`DatabaseTableMetadataFetcher.findDataSource/findTable` 每次全量遍历**：表多时开销大，建议数据源/表名短时缓存
+#### 待优化项（2026-08-03 已按报告顺序修复）
+- **`DataChartView extends DialogWrapper` 用错基类**：经评估，`.form` 字段绑定依赖 `DialogWrapper.init()` 运行时加载，且构建未配置 GUI Designer 编译插件，彻底改继承会破坏字段注入 → **保留继承**，但补真实泄漏修复：`KanbanBoard` 新增 `dispose()` 注销 DnD target（`dropHandler.unregisterFrom`），由 `DataChartView.dispose()` 调用，避免编辑器关闭后 DnD 目标仍指向已释放组件
+- **`PluginIcons` 60+ 图标全部加载** → 删除 50+ 从未引用的图标字段，只保留实际使用（表格列图标 + 工具栏按钮）；另注 `IconLoader.getIcon()` 本身是延迟加载（首次 paint 才解析 SVG），类加载不触发立即 I/O
+- **`KanbanBoard.paintComponent` 全量重绘** → `computeLinkedRows()` 结果缓存到 `linkedRowsCache` 字段（改非 final，初始 null），仅在 `addConnection`/`removeConnection`/`deleteCard`/`loadFromChartData.clear` 时置 null 失效；`refreshRelatedRows` 依赖交互高亮，保持每次重算
+- **`DatabaseTableMetadataFetcher.findDataSource/findTable` 全量遍历** → 数据源对象运行时可变，引入缓存有失效风险，**不做数据缓存**；改为给 `findMethod`（`getMethod` 精确签名）也加 METHOD_CACHE（key 前缀 `F#.` 区分），消除热路径反射查找
+
+#### 遗留说明
+- `DataChartView extends DialogWrapper` 架构不纯问题仍在：彻底改继承需引入 IntelliJ GUI Designer 表单编译插件（如 `org.jetbrains.intellij` form 编译）或手写 UI，且对话框从未 `show()`，实际泄漏风险低，建议后续专项处理

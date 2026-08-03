@@ -88,8 +88,11 @@ public class KanbanBoard extends JPanel {
 	/** 连线列表 */
 	private final List<Connection> connections = new ArrayList<>();
 
-	/** 连线占用行缓存（每次重绘前重新计算，不依赖元素状态） */
-	private final Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = new HashMap<>();
+	/**
+	 * 连线占用行缓存。2026-08-03 优化：null 表示需重算（连线增删时置 null），
+	 * 非 null 时复用，避免每次重绘全量遍历连线。
+	 */
+	private Map<KanbanCard, Map<Integer, Color>> linkedRowsCache;
 
 	/** 连线预览高亮（鼠标拖动时临时高亮源/目标行） */
 	private final Map<KanbanCard, Map<Integer, Color>> previewHighlightRows = new HashMap<>();
@@ -202,6 +205,22 @@ public class KanbanBoard extends JPanel {
 			notifyBoardChanged();
 		});
 		dropHandler.registerTo(this);
+	}
+
+	/**
+	 * 释放资源：注销 DnD 拖拽目标，避免编辑器关闭后仍持有对已释放组件的引用。
+	 *
+	 * <p>由上层（{@link DataChartView#dispose()}）在编辑器销毁时调用。</p>
+	 */
+	public void dispose() {
+		if (dropHandler != null) {
+			try {
+				dropHandler.unregisterFrom(this);
+			} catch (Exception ignore) {
+				// 注销失败不影响整体释放
+			}
+			dropHandler = null;
+		}
 	}
 
 	/**
@@ -671,6 +690,7 @@ public class KanbanBoard extends JPanel {
 
 		cards.remove(card);
 		connections.removeIf(conn -> conn.getSource() == card || conn.getTarget() == card);
+		linkedRowsCache = null; // 删表可能移除连线，失效占用行缓存
 		if (selectedCard == card) {
 			selectedCard = null;
 		}
@@ -881,7 +901,10 @@ public class KanbanBoard extends JPanel {
 	 * 绘制所有卡片（含连线占用行高亮、关联列高亮、预览高亮）。
 	 */
 	private void drawCards(Graphics2D g2d, boolean dark) {
-		Map<KanbanCard, Map<Integer, Color>> linkedRowsCache = computeLinkedRows();
+		// 2026-08-03 优化：连线占用行缓存只在连线增删时失效，避免每次重绘全量重算
+		if (linkedRowsCache == null) {
+			linkedRowsCache = computeLinkedRows();
+		}
 		refreshRelatedRows();
 		for (KanbanCard c : cards) {
 			c.clearActiveRowColors();
@@ -1209,6 +1232,7 @@ public class KanbanBoard extends JPanel {
 		connectionColorIndex++;
 		Connection conn = new Connection(source, sourceRow, target, targetRow, color, relationType);
 		connections.add(conn);
+		linkedRowsCache = null; // 连线结构变化，失效占用行缓存
 		repaint();
 		notifyBoardChanged();
 		return conn;
@@ -1240,6 +1264,7 @@ public class KanbanBoard extends JPanel {
 		if (selectedConnection == conn) {
 			selectedConnection = null;
 		}
+		linkedRowsCache = null; // 连线结构变化，失效占用行缓存
 		repaint();
 		notifyBoardChanged();
 	}
@@ -1413,6 +1438,7 @@ public class KanbanBoard extends JPanel {
 
 		// 恢复连线
 		connections.clear();
+		linkedRowsCache = null;
 		connectionColorIndex = 0;
 		BoardPersistence.loadFromChartData(data,
 				this::findCardById, this::addConnection);

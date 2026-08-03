@@ -440,6 +440,19 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	}
 
 	private static Method findMethod(Class<?> clazz, String method) {
+		String key = "F#." + clazz.getName() + "#" + method;
+		java.lang.reflect.Method cached = METHOD_CACHE.get(key);
+		if (cached != null) {
+			return cached;
+		}
+		java.lang.reflect.Method found = findMethodUncached(clazz, method);
+		if (found != null) {
+			METHOD_CACHE.put(key, found);
+		}
+		return found;
+	}
+
+	private static java.lang.reflect.Method findMethodUncached(Class<?> clazz, String method) {
 		try {
 			return clazz.getMethod(method);
 		} catch (NoSuchMethodException e) {
