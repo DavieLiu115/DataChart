@@ -515,3 +515,58 @@ if (maxCmtW > 10) {
   - 保留 `isSelected/setSelected` 语义，原有 ActionListener 业务不变，仅 `addRelationTypeItem` 改用它
   - 颜色一律 `JBColor(light, dark)` 双态，自动适配深浅主题
 - **踩坑**：Swing L&F 的 `CheckBoxMenuItem.checkIcon` 从 UIDefaults 加载后被 `BasicMenuItemUI` 缓存，直接改 UIDefaults 不生效，必须自定义组件 paint。
+- **踩坑（2026-08-04 Win 菜单宽度不够）**：自绘 `paintComponent` 接管渲染后，Swing 默认的 `BasicMenuItemUI.getPreferredSize()` 依赖 `checkIcon` 计算宽度，而本组件已经把默认 icon 关掉，导致子菜单宽度按 0 icon 宽算，**Win 系统下 "一对多/多对多" 被截断**。必须重写 `getPreferredSize()`：手动算 `BOX_LEFT_PADDING(18) + BOX_SIZE(14) + 6 + 文字宽度 + 右边距(12)`，高度 `max(BOX_SIZE+8, fm.getHeight()+6)`。父类 L&F 算 preferredSize 不可信是自绘菜单项的通用坑。
+
+### 30. 列行左键起手连线（2026-08-04 修复 Win 系统不能拖线）
+#### 问题
+Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不会自动建立**，必须先右键起手才能连线。用户期望"鼠标移动终点，松开按钮自动连上"。
+
+#### 根因
+- 原 `mousePressed` 列行分支只在**右键** (`isPopupTrigger` || BUTTON3) 才设置 `isConnecting=true`
+- 左键点击列只调用 `toggleRowSelection(card, rowIndex)`（列高亮），不进入连线模式
+- 用户实际想要"在列上按下拖动"，但 Mac 习惯（Win 上大多数人也是）用左键拖拽，左键被高亮逻辑"拦截"了
+
+#### 方案：待连线状态 + 移动阈值升级
+不能简单地把"左键列行 = 立即连线"，否则会破坏"快速点击列 = 选中高亮"的原有交互。用阈值延迟升级：
+
+- **新增字段**（`KanbanBoard`）：
+  - `pendingConnectionSource / pendingConnectionSourceRow / pendingConnectionPressPoint`：左键按下列行时记录"待连线"三件套
+  - `CONNECTION_DRAG_THRESHOLD = 4`（屏幕像素）
+- **mousePressed 左键列行分支**：不再立即 toggleRowSelection，而是设置 pendingConnection*；不入 `isConnecting=true`，不画预览线
+- **mouseDragged 新增分支**：`pendingConnectionSource != null` 时计算 `dx² + dy² >= 16` 就升级为 `isConnecting=true` + 设光标 + repaint + 清空 pending
+- **mouseReleased**：先检查 `pendingConnectionSource`，未升级就 `toggleRowSelection(pendingCard, pendingRow)`，保持原"快速点击列 = 高亮"行为；再走原有的 `isConnecting` 分支查找 targetCard 并 `addConnection`
+
+#### 行为
+- 快速左键点击列（不移动） → 触发列高亮（原行为不变）
+- 左键按下列后拖动 ≥4px → 进入连线预览；移动到目标列松手 → 自动 addConnection
+- 右键行为完全不变（保持弹菜单/连线的原有逻辑）
+
+#### 设计原则
+- **拖拽判定用阈值而非时间**：避免长按造成点击/拖拽歧义
+- **左键列行 = 拖拽优先**：Mac/Win 现代 GUI 默认（图标/列表项拖动都是左键），不再依赖右键起手
+- **不破坏现有列高亮交互**：未移动就松手仍触发 toggleRowSelection，与之前等价
+
+### 31. 连线松手点飘走不丢失连接（2026-08-04 优化）
+#### 问题
+"鼠标移到 leader 行没点击，点一下别处连接就没了"——拖拽过程中预览高亮正确显示了 leader 行，但松手时鼠标飘到空白处（甚至隔壁行），原 `mouseReleased` 用松手点找 `targetCard`，找不到就不 `addConnection`，预览高亮消失，用户视觉上"连接没了"。
+
+#### 修复：记录最后一次 hover 的目标
+- **新增字段**：`lastHoverTargetCard / lastHoverTargetRow`（KanbanBoard 字段）
+- **`mouseDragged` isConnecting 分支**：命中目标行时同步写入 lastHoverTarget（仅在 `targetCard != connectionSource` 时）
+- **`mouseReleased` isConnecting 分支**：
+  1. 优先用 `lastHoverTargetCard / lastHoverTargetRow` 建线
+  2. 没有 hover 过有效目标（null 或 == connectionSource）才回退到松手点找 targetCard
+  3. mouseReleased 末尾清空 lastHoverTarget
+- **`mousePressed` 进入连线时清空 lastHoverTarget**：防止上次拖拽残留（两个入口：右键列行 + 升级瞬间）
+
+#### 行为
+- 拖到目标列（leader）→ 飘到空白松手 → **仍按 leader 建线**（用户期望）
+- 拖到目标列（leader）→ 在 leader 上松手 → 按 leader 建线（原有行为不变）
+- 没有 hover 过任何有效目标 → 回退到松手点位置判断（兼容快速点击场景）
+- 松手点 = source card 上 → targetCard == connectionSource 不会建线（自连禁止）
+
+#### 设计原则
+- **以"用户最终选择的目标"为准**：松手点是次要的，hover 状态更准确反映用户意图
+- **兼容快速点击场景**：没 hover 过任何有效目标（按一下就松）才用松手点判断
+- **避免自连**：判断 `targetCard != connectionSource` 双保险（hover 阶段和松手阶段都校验）
+

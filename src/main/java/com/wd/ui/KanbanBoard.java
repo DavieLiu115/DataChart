@@ -119,6 +119,26 @@ public class KanbanBoard extends JPanel {
 	/** 连线模式：临时预览线 */
 	private boolean isConnecting = false;
 
+	/**
+	 * 连线拖拽过程中最后一次命中的目标卡片/行（2026-08-04 修复）：
+	 * 鼠标悬停在 leader 等目标列行时记录，即使松手时鼠标飘到空白处，仍按该目标建线。
+	 * 解决"鼠标移到 leader 上没点击，点一下别处连接就没了"的问题。
+	 */
+	private KanbanCard lastHoverTargetCard = null;
+	private int lastHoverTargetRow = -1;
+
+	/**
+	 * 连线起手判定（2026-08-04 修复 Win 系统"列行左键起手不能连线"）：
+	 * 在列行区域按下左键时，先进入"待连线"状态（不立即显示预览线，也不触发列高亮），
+	 * 等鼠标移动超过 {@link #CONNECTION_DRAG_THRESHOLD} 像素才升级为真正连线模式。
+	 * 这样既能保留"快速点击列 = 选中高亮"的原有交互，又能让左键起手拖拽自动连线。
+	 */
+	private KanbanCard pendingConnectionSource = null;
+	private int pendingConnectionSourceRow = -2;
+	private Point pendingConnectionPressPoint = null;
+	/** 左键拖动升级为连线的距离阈值（屏幕像素） */
+	private static final int CONNECTION_DRAG_THRESHOLD = 4;
+
 	/** 是否显示网格 */
 	private boolean showGrid = true;
 
@@ -318,12 +338,22 @@ public class KanbanBoard extends JPanel {
 								connectionSourceRow = rowIndex;
 								connectionCurrentPoint = transformedPoint;
 								isConnecting = true;
+								lastHoverTargetCard = null;
+								lastHoverTargetRow = -1;
 								setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
 								repaint();
 							}
 						} else {
-							// 左键点击：切换普通选中（橙色 #FE9933），并触发关联列高亮
-							toggleRowSelection(card, rowIndex);
+							// 左键点击列行（2026-08-04）：
+							// 先进入"待连线"状态，等鼠标移动超过阈值才升级为连线模式；
+							// 如果松手前没移动过阈值，mouseReleased 会按"普通点击"触发列高亮。
+							// 这样既支持 Win 系统下"左键起手拖拽自动连线"，
+							// 又保留"快速左键点击列 = 选中高亮"的原有交互。
+							pendingConnectionSource = card;
+							pendingConnectionSourceRow = rowIndex;
+							pendingConnectionPressPoint = e.getPoint();
+							lastHoverTargetCard = null;
+							lastHoverTargetRow = -1;
 						}
 						return;
 					}
@@ -356,22 +386,45 @@ public class KanbanBoard extends JPanel {
 				activeSnapGuideV = null;
 				activeSnapGuideH = null;
 
+				// 待连线但未升级（2026-08-04）：鼠标没移动过阈值就松手，
+				// 按"普通左键点击列行"处理 → 触发列高亮，保持原有交互。
+				if (pendingConnectionSource != null) {
+					KanbanCard pendingCard = pendingConnectionSource;
+					int pendingRow = pendingConnectionSourceRow;
+					pendingConnectionSource = null;
+					pendingConnectionSourceRow = -2;
+					pendingConnectionPressPoint = null;
+					toggleRowSelection(pendingCard, pendingRow);
+				}
+
 				// 连线模式释放：尝试建立连接
 				if (isConnecting) {
-					Point2D transformedPoint = viewport.transformPoint(e.getPoint());
-					KanbanCard targetCard = findCardAt(e.getPoint());
-					if (targetCard != null && targetCard != connectionSource) {
-						int targetRow = targetCard.getRowIndexAt(
-								transformedPoint.getX(), transformedPoint.getY());
-						if (targetRow >= 0) {
-							addConnection(connectionSource, connectionSourceRow,
-									targetCard, targetRow);
+					// 2026-08-04：优先用拖拽过程中最后一次 hover 的目标建线，
+					// 避免松手点飘到空白处时连线丢失（用户反馈"鼠标移到 leader 上没点击，
+					// 点一下别处连接就没了"）。
+					KanbanCard targetCard = lastHoverTargetCard;
+					int targetRow = lastHoverTargetRow;
+					if (targetCard == null || targetRow < 0
+							|| targetCard == connectionSource) {
+						// 没有 hover 过有效目标，回退到松手点位置判断（兼容快速点击场景）
+						Point2D transformedPoint = viewport.transformPoint(e.getPoint());
+						targetCard = findCardAt(e.getPoint());
+						if (targetCard != null && targetCard != connectionSource) {
+							targetRow = targetCard.getRowIndexAt(
+									transformedPoint.getX(), transformedPoint.getY());
 						}
+					}
+					if (targetCard != null && targetCard != connectionSource
+							&& targetRow >= 0) {
+						addConnection(connectionSource, connectionSourceRow,
+								targetCard, targetRow);
 					}
 					previewHighlightRows.clear();
 					connectionSource = null;
 					connectionSourceRow = -2;
 					connectionCurrentPoint = null;
+					lastHoverTargetCard = null;
+					lastHoverTargetRow = -1;
 					isConnecting = false;
 				}
 
@@ -401,9 +454,33 @@ public class KanbanBoard extends JPanel {
 							previewHighlightRows
 									.computeIfAbsent(targetCard, k -> new HashMap<>())
 									.put(targetRow, CONNECTION_PREVIEW_COLOR);
+							// 2026-08-04：记录最后一次 hover 的目标，
+							// 让 mouseReleased 即使松手在空白处也能建线
+							lastHoverTargetCard = targetCard;
+							lastHoverTargetRow = targetRow;
 						}
 					}
 					repaint();
+				} else if (pendingConnectionSource != null) {
+					// 待连线状态（2026-08-04）：鼠标移动距离超过阈值才升级为真正连线
+					if (pendingConnectionPressPoint != null) {
+						double dx = e.getX() - pendingConnectionPressPoint.getX();
+						double dy = e.getY() - pendingConnectionPressPoint.getY();
+						if (dx * dx + dy * dy >= CONNECTION_DRAG_THRESHOLD
+								* (double) CONNECTION_DRAG_THRESHOLD) {
+							connectionSource = pendingConnectionSource;
+							connectionSourceRow = pendingConnectionSourceRow;
+							connectionCurrentPoint = viewport.transformPoint(e.getPoint());
+							isConnecting = true;
+							lastHoverTargetCard = null;
+							lastHoverTargetRow = -1;
+							setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+							pendingConnectionSource = null;
+							pendingConnectionSourceRow = -2;
+							pendingConnectionPressPoint = null;
+							repaint();
+						}
+					}
 				} else if (draggedCard != null) {
 					// 拖拽卡片（含磁吸 + 对齐辅助线）
 					try {

@@ -20,7 +20,7 @@ intellij {
 //    version.set("2023.2.6")
 //    type.set("IU") // Target IDE Platform
     intellij.updateSinceUntilBuild = false
-    localPath.set("/Users/lww/Downloads/ideaJar/ideaIU-2023.2.6")
+    localPath.set("E:\\ideac\\ideaIU-2023.2.6")
     plugins.set(
         listOf(
             /* Plugin Dependencies */
@@ -56,6 +56,7 @@ tasks {
     withType<JavaCompile> {
         sourceCompatibility = "17"
         targetCompatibility = "17"
+        options.encoding = "UTF-8"
     }
     withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile> {
         kotlinOptions.jvmTarget = "17"

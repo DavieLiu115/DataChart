@@ -277,6 +277,19 @@ public final class BoardContextMenu {
 		}
 
 		@Override
+		public java.awt.Dimension getPreferredSize() {
+			// 自绘勾选框后 Swing 默认的 BasicMenuItemUI.getPreferredSize() 不再可靠
+			//（它依赖 checkIcon，而这里我们关掉了），结果会导致子菜单宽度按默认 icon 0 宽算，
+			// 在 Win 系统下出现"一对多/多对多"被截断的问题。这里手动算：勾选框占位 + 文字宽度 + 边距。
+			java.awt.FontMetrics fm = getFontMetrics(getFont());
+			String text = getText();
+			int textWidth = (text == null) ? 0 : fm.stringWidth(text);
+			int width = BOX_LEFT_PADDING + BOX_SIZE + 6 + textWidth + 12;
+			int height = Math.max(BOX_SIZE + 8, fm.getHeight() + 6);
+			return new java.awt.Dimension(width, height);
+		}
+
+		@Override
 		public void paintComponent(Graphics g) {
 			Graphics2D g2 = (Graphics2D) g.create();
 			try {
