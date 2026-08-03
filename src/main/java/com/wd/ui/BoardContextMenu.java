@@ -4,13 +4,22 @@ import com.intellij.ui.JBColor;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableInfo;
 import com.wd.model.RelationType;
+import java.awt.BasicStroke;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.Toolkit;
 import java.awt.datatransfer.Clipboard;
 import java.awt.datatransfer.StringSelection;
+import javax.swing.Icon;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
+import javax.swing.UIManager;
 
 /**
  * 看板右键菜单构建：统一生成与当前主题适配的弹出菜单。
@@ -91,10 +100,9 @@ public final class BoardContextMenu {
 	 */
 	private static void addRelationTypeItem(JMenu parent, String label,
 			RelationType type, Connection conn, Runnable onRepaint, Runnable onNotifyChanged) {
-		JCheckBoxMenuItem item = new JCheckBoxMenuItem(label);
-		item.setSelected(conn.getRelationType() == type);
-		item.setForeground(JBColor.foreground());
-		item.setBackground(JBColor.background());
+		// 使用 FlatCheckBoxMenuItem 自绘勾选框，避免 IntelliJ 主题下 Swing L&F 默认勾选框
+		// 颜色与菜单背景对比度过低（浅色下显示为深灰填充，看不清勾选状态）。
+		FlatCheckBoxMenuItem item = new FlatCheckBoxMenuItem(label, conn.getRelationType() == type);
 		item.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
 		item.putClientProperty("MenuItem.selectionBackground", JBColor.background());
 		item.addActionListener(e -> {
@@ -216,5 +224,136 @@ public final class BoardContextMenu {
 		defaults.put("RadioButtonMenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
 		defaults.put("RadioButtonMenuItem.selectionBackground", JBColor.background());
 		menuUiPatched = true;
+	}
+
+	/**
+	 * 自定义勾选菜单项：完整自绘勾选框，绕开 Swing L&F 的 {@code CheckBoxMenuItemUI}，
+	 * 使其在 IntelliJ 浅色 / 深色主题下都有清晰的勾选视觉。
+	 *
+	 * <p>问题（2026-08-03 修复）：默认 L&F 渲染的勾选框在浅色主题下用 {@code Gray._40}
+	 * 深灰填充方框作为"勾"，与白色菜单背景对比度低，看不出勾选状态。本类直接用
+	 * {@code Graphics2D} 画一个清晰的"蓝底白对勾"（选中）或"白底灰边方框"（未选中），
+	 * 颜色由 {@link JBColor} 双态自动适配主题。</p>
+	 *
+	 * <p>设计要点：</p>
+	 * <ul>
+	 *   <li>保留 {@link JCheckBoxMenuItem} 的 {@code isSelected}/{@code setSelected} 行为，
+	 *       原有 ActionListener / Model 业务逻辑不需要改</li>
+	 *   <li>勾选框大小 = 14×14，与 Swing 默认 CheckBox 视觉尺寸一致</li>
+	 *   <li>文字、选中态、disabled 态仍由 Swing L&F 渲染，视觉与普通 JMenuItem 协调</li>
+	 *   <li>勾选框在文字左侧预留 18px（与 L&F 默认对齐），不影响整行布局</li>
+	 * </ul>
+	 */
+	private static final class FlatCheckBoxMenuItem extends JCheckBoxMenuItem {
+
+		/** 勾选框尺寸（画板坐标像素） */
+		private static final int BOX_SIZE = 14;
+		/** 文字左侧给勾选框预留的宽度（含间距） */
+		private static final int BOX_LEFT_PADDING = 18;
+
+		/** 选中态方框填充色：浅色深蓝 / 深色亮蓝，与菜单 hover 文字色系一致 */
+		private static final Color CHECKED_FILL = new JBColor(
+				new Color(0x2470B0), // 浅色：与 MENU_HOVER_FOREGROUND 同色
+				new Color(0x4A90E2)); // 深色：稍亮，避免与暗背景对比不足
+		/** 未选中态方框边框色：浅色中灰 / 深色浅灰 */
+		private static final Color UNCHECKED_BORDER = new JBColor(
+				new Color(0xB0B0B0),
+				new Color(0x6B6B6B));
+		/** 未选中态方框填充色：浅色白 / 深色跟随菜单背景（用 background，不透明） */
+		private static final Color UNCHECKED_FILL = new JBColor(
+				new Color(0xFFFFFF),
+				new Color(0x3C3F41));
+		/** 对勾颜色：固定白色，对蓝底始终清晰 */
+		private static final Color CHECK_MARK_COLOR = new Color(0xFFFFFF);
+
+		FlatCheckBoxMenuItem(String text, boolean selected) {
+			super(text, selected);
+			// 关键：让父类 L&F 不再画默认 checkIcon（实际靠 BasicMenuItemUI 缓存 checkIcon，
+			// 关闭 opaque 让自定义 paint 接管整个 cell 渲染）
+			setOpaque(true);
+			setBorderPainted(false);
+			// 使用 JBColor 让文字随主题切换；背景由我们自绘
+			setForeground(JBColor.foreground());
+		}
+
+		@Override
+		public void paintComponent(Graphics g) {
+			Graphics2D g2 = (Graphics2D) g.create();
+			try {
+				// 抗锯齿
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+						RenderingHints.VALUE_ANTIALIAS_ON);
+				g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
+						RenderingHints.VALUE_STROKE_PURE);
+
+				// 1. 整行背景：先画菜单背景（避免后续绘制时露出组件默认色）
+				Color rowBg = isArmed() || isSelected()
+						? UIManager.getColor("MenuItem.selectionBackground")
+						: getBackground();
+				if (rowBg == null) {
+					rowBg = JBColor.background();
+				}
+				g2.setColor(rowBg);
+				g2.fillRect(0, 0, getWidth(), getHeight());
+
+				// 2. 勾选框：垂直居中于行高
+				int boxY = (getHeight() - BOX_SIZE) / 2;
+				drawCheckBox(g2, BOX_LEFT_PADDING, boxY);
+
+				// 3. 文字：从 BOX_LEFT_PADDING + BOX_SIZE + 间距 开始绘制
+				//    用 Swing 内部 BasicMenuItemUI 渲染文字以保持和其它菜单项一致
+				//    简化做法：直接用 Graphics2D.drawString，文字颜色取 foreground
+				g2.setColor(getForeground());
+				int textX = BOX_LEFT_PADDING + BOX_SIZE + 6;
+				int textY = computeTextY(g2);
+				String text = getText();
+				if (text != null) {
+					g2.drawString(text, textX, textY);
+				}
+			} finally {
+				g2.dispose();
+			}
+		}
+
+		/**
+		 * 绘制勾选框（含对勾 / 空框 / disabled 三态）。
+		 */
+		private void drawCheckBox(Graphics2D g2, int x, int y) {
+			boolean selected = isSelected();
+			// 未选中：白/灰底 + 灰边；选中：蓝底（无独立边框）+ 白对勾
+			if (selected) {
+				g2.setColor(CHECKED_FILL);
+				g2.fillRoundRect(x, y, BOX_SIZE, BOX_SIZE, 3, 3);
+			} else {
+				g2.setColor(UNCHECKED_FILL);
+				g2.fillRoundRect(x, y, BOX_SIZE, BOX_SIZE, 3, 3);
+				g2.setColor(UNCHECKED_BORDER);
+				Stroke old = g2.getStroke();
+				g2.setStroke(new BasicStroke(1.0f));
+				g2.drawRoundRect(x, y, BOX_SIZE - 1, BOX_SIZE - 1, 3, 3);
+				g2.setStroke(old);
+			}
+
+			// 对勾：只在选中时画
+			if (selected) {
+				g2.setColor(CHECK_MARK_COLOR);
+				Stroke old = g2.getStroke();
+				g2.setStroke(new BasicStroke(1.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+				// 14x14 方框内画 √ ：从 (x+3, y+7) -> (x+6, y+10) -> (x+11, y+4)
+				int[] xs = {x + 3, x + 6, x + 11};
+				int[] ys = {y + 7, y + 10, y + 4};
+				g2.drawPolyline(xs, ys, 3);
+				g2.setStroke(old);
+			}
+		}
+
+		/**
+		 * 文字基线 Y 坐标：让文字垂直居中（与 Swing 默认 JMenuItem 行为一致）。
+		 */
+		private int computeTextY(Graphics2D g2) {
+			java.awt.FontMetrics fm = g2.getFontMetrics(getFont());
+			int textHeight = fm.getAscent() - fm.getDescent();
+			return (getHeight() - textHeight) / 2 + fm.getAscent() - 1;
+		}
 	}
 }
