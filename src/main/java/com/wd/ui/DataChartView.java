@@ -37,6 +37,7 @@ public class DataChartView extends DialogWrapper {
 	private JLabel zoomPercentLabel;
 	private JPanel dataView;
 	private JButton focusButton;
+	private JButton donateButton;
 	private KanbanBoard kanbanBoard;
 	private Project project;
 
@@ -73,6 +74,12 @@ public class DataChartView extends DialogWrapper {
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
 		focusButton.setIcon(PluginIcons.autoLayout);
 		focusButton.setText("Focus");
+		donateButton.setIcon(PluginIcons.Donation);
+		donateButton.setRolloverIcon(PluginIcons.Donation_Enter);
+		donateButton.setContentAreaFilled(false);
+		donateButton.setBorderPainted(false);
+		donateButton.setToolTipText("Donation");
+
 		// 初次构造后立即刷新一次 zoom 显示（100%）
 		updateSearchStatusLabel();
 	}
@@ -101,6 +108,13 @@ public class DataChartView extends DialogWrapper {
 			exportPictureButton.setToolTipText("导出为图片（JPG）");
 			exportPictureButton.addActionListener(e -> exportAsImage());
 		}
+		if (donateButton != null) {
+			donateButton.addActionListener(e -> {
+				Donation donation = new Donation(project);
+				donation.show();
+			});
+		}
+
 	}
 
 	/**
