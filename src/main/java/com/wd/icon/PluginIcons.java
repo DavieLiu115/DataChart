@@ -29,8 +29,11 @@ public class PluginIcons {
 
     // 工具栏按钮图标（DataChartView 使用）
     public static final Icon export = load("/icons/export.svg");
+    public static final Icon export_dark = load("/icons/export_dark.svg");
     public static final Icon image = load("/icons/image.svg");
+    public static final Icon image_dark = load("/icons/image_dark.svg");
     public static final Icon autoLayout = load("/icons/autoLayout.svg");
+    public static final Icon autoLayout_dark = load("/icons/autoLayout_dark.svg");
     public static final Icon Donation = load("/icons/donation.svg");
     public static final Icon Donation_Enter = load("/icons/donation_enter.svg");
 
