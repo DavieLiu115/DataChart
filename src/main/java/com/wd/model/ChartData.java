@@ -13,6 +13,14 @@ import java.util.List;
  */
 public class ChartData {
 
+	/**
+	 * 给 AI 的文件使用说明（JSON 中位于最前）。
+	 *
+	 * <p>新建 .datachart 文件时由模板写入，随保存持久化；解析时 fastjson 按字段读取。
+	 * 仅作为给 AI 的使用指引，业务逻辑不依赖该字段。</p>
+	 */
+	private String aiGuide;
+
 	/** 格式版本 */
 	private String version = "1.0";
 
@@ -24,6 +32,14 @@ public class ChartData {
 
 	/** 表之间的连接关系 */
 	private List<ChartRelation> relations = new ArrayList<>();
+
+	public String getAiGuide() {
+		return aiGuide;
+	}
+
+	public void setAiGuide(String aiGuide) {
+		this.aiGuide = aiGuide;
+	}
 
 	public String getVersion() {
 		return version;

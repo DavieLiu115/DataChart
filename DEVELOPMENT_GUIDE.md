@@ -100,6 +100,11 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - 保存：`BoardPersistence.toChartData` 通过 `resolveColumnName` 从行 index 取列名一并写入
   - 加载：`loadFromChartData` 用 `resolveRowIndex` **优先按列名定位**真实 index，找不到（旧文件无列名）才回退旧 index → 向后兼容旧 .datachart
   - 新保存的文件即使之后增删列，只要列名还在，连线仍准确落在该列
+- **AI 使用说明 `_aiGuide`（2026-08-03）**：`.datachart` JSON 头部含 `_aiGuide` 字段，给 AI 读文件时的使用指引
+  - `ChartData` 有 `aiGuide` 字段（声明在 `version` 前，序列化时靠前输出）
+  - 新建文件由模板 `fileTemplates/DataChart.datachart.ft` 写入默认说明；fastjson 默认不序列化 null，旧文件无该字段不影响
+  - **传递链**：`DataChartView` 加载时 `data.getAiGuide()` 暂存到 `DataChartView.aiGuide` 字段，保存时 `serializeToJson` 用 `data.setAiGuide(aiGuide)` 写回——避免因 `KanbanBoard.toChartData()` 重建 ChartData 而丢失
+  - 注意：JSON 不支持原生注释，故用 JSON 字段承载说明，不影响 fastjson 解析
 
 ### 14. ER 图交互规范（ER-style interaction）
 

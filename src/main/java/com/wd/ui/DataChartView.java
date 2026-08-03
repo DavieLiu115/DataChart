@@ -59,6 +59,14 @@ public class DataChartView extends DialogWrapper {
 	 */
 	private String baseFileName = "datachart";
 
+	/**
+	 * 给 AI 的文件使用说明（来自 .datachart JSON 的 _aiGuide 字段）。
+	 *
+	 * <p>加载时从 JSON 读取暂存，保存时写回，避免随 {@link KanbanBoard#toChartData()}
+	 * 重建 {@link ChartData} 而丢失。新建文件时由模板提供默认说明。</p>
+	 */
+	private String aiGuide;
+
 	public DataChartView(@Nullable Project project) {
 		super(project);
 		this.project = project;
@@ -327,6 +335,7 @@ public class DataChartView extends DialogWrapper {
 	 */
 	public String serializeToJson() {
 		ChartData data = kanbanBoard.toChartData();
+		data.setAiGuide(aiGuide);
 		return JSON.toJSONString(data);
 	}
 
@@ -338,8 +347,10 @@ public class DataChartView extends DialogWrapper {
 			return;
 		}
 		try {
-			ChartData data = JSON.parseObject(json, ChartData.class);
-			kanbanBoard.loadFromChartData(data);
+		ChartData data = JSON.parseObject(json, ChartData.class);
+		// 暂存给 AI 的使用说明，保存时写回，避免随看板重建丢失
+		aiGuide = data.getAiGuide();
+		kanbanBoard.loadFromChartData(data);
 			// 加载新文件后清空搜索状态，避免旧搜索结果干扰
 			if (searchTextField != null) {
 				searchTextField.setText("");
