@@ -20,6 +20,7 @@ intellij {
 //    version.set("2023.2.6")
 //    type.set("IU") // Target IDE Platform
     intellij.updateSinceUntilBuild = false
+//    localPath.set("/Users/lww/Downloads/ideaJar/ideaIU-2023.2.6")
     localPath.set("E:\\ideac\\ideaIU-2023.2.6")
     plugins.set(
         listOf(
