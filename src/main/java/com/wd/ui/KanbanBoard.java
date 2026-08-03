@@ -1209,7 +1209,7 @@ public class KanbanBoard extends JPanel {
 	 */
 	public Connection addConnection(KanbanCard source, int sourceRow,
 			KanbanCard target, int targetRow) {
-		return addConnection(source, sourceRow, target, targetRow, RelationType.UNKNOWN);
+		return addConnection(source, sourceRow, target, targetRow, RelationType.ONE_TO_ONE);
 	}
 
 	/**

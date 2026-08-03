@@ -491,3 +491,27 @@ if (maxCmtW > 10) {
 
 #### 遗留说明
 - `DataChartView extends DialogWrapper` 架构不纯问题仍在：彻底改继承需引入 IntelliJ GUI Designer 表单编译插件（如 `org.jetbrains.intellij` form 编译）或手写 UI，且对话框从未 `show()`，实际泄漏风险低，建议后续专项处理
+
+### 29. 关系类型默认值 + 勾选框自绘（2026-08-03）
+
+#### 连线默认关系类型改为"一对一"
+- **背景**：新画连线默认 `RelationType.UNKNOWN`（渲染时两端三叉 = 视觉等同多对多），用户反馈希望默认一对一。
+- **改动点**（`UNKNOWN` → `ONE_TO_ONE`）：
+  - `Connection.relationType` 字段默认值、无参构造、6 参构造的 null fallback、`setRelationType` 的 null fallback
+  - `KanbanBoard.addConnection(src,row,tgt,row)` 无参重载传入的默认类型
+  - `BoardPersistence.loadFromChartData`：加载时若 `getRelationType()` 为 null 或 `UNKNOWN`，统一回退 `ONE_TO_ONE`（旧文件 / 缺失字段向后兼容）
+- **说明**：`RelationType.UNKNOWN` 在 `Connection.paint` 中被当作"多对多"渲染（两端三叉），故新默认与加载回退都指向一对一，避免旧文件连线意外变回多对多视觉。
+
+#### 勾选框浅色主题对比度优化（FlatCheckBoxMenuItem）
+- **问题**：关系类型子菜单用 `JCheckBoxMenuItem`，IntelliJ 浅色主题下 Swing L&F 默认勾选框是 `Gray._40` 深灰填充，与白底菜单对比度低、看不出勾选状态。
+- **方案**：新增 `BoardContextMenu.FlatCheckBoxMenuItem`（继承 `JCheckBoxMenuItem`），重写 `paintComponent` 完整自绘 cell：
+  - 整行背景：`isArmed/isSelected ? MenuItem.selectionBackground : getBackground()`
+  - 勾选框 14×14 圆角矩形，垂直居中于行高：
+    - 选中：蓝底（浅色 `#2470B0` / 深色 `#4A90E2`，`JBColor` 双态）+ 白色对勾（`drawPolyline` 折线）
+    - 未选中：填充 `#FFFFFF`（浅色）/`#3C3F41`（深色）+ 1px 灰边（`#B0B0B0` / `#6B6B6B`）
+  - 文字：`getForeground()`（`JBColor.foreground()`）从 `18 + 14 + 6` 处开始 `drawString`，基线用 FontMetrics 垂直居中
+- **关键点**：
+  - `setOpaque(true)` + `setBorderPainted(false)`，绕开 `BasicMenuItemUI` 缓存的 `checkIcon` 渲染
+  - 保留 `isSelected/setSelected` 语义，原有 ActionListener 业务不变，仅 `addRelationTypeItem` 改用它
+  - 颜色一律 `JBColor(light, dark)` 双态，自动适配深浅主题
+- **踩坑**：Swing L&F 的 `CheckBoxMenuItem.checkIcon` 从 UIDefaults 加载后被 `BasicMenuItemUI` 缓存，直接改 UIDefaults 不生效，必须自定义组件 paint。

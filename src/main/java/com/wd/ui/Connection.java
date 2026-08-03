@@ -30,11 +30,11 @@ public class Connection {
 	private Color color;
 	private float strokeWidth = DEFAULT_STROKE_WIDTH;
 
-	/** 关系类型：决定起点/终点的形状（鸟爪/分叉等） */
-	private RelationType relationType = RelationType.UNKNOWN;
+	/** 关系类型：决定起点/终点的形状（鸟爪/分叉等）；新建连线默认一对一 */
+	private RelationType relationType = RelationType.ONE_TO_ONE;
 
 	public Connection(KanbanCard source, int sourceRow, KanbanCard target, int targetRow, Color color) {
-		this(source, sourceRow, target, targetRow, color, RelationType.UNKNOWN);
+		this(source, sourceRow, target, targetRow, color, RelationType.ONE_TO_ONE);
 	}
 
 	public Connection(KanbanCard source, int sourceRow, KanbanCard target, int targetRow,
@@ -44,7 +44,7 @@ public class Connection {
 		this.target = target;
 		this.targetRow = targetRow;
 		this.color = color;
-		this.relationType = relationType == null ? RelationType.UNKNOWN : relationType;
+		this.relationType = relationType == null ? RelationType.ONE_TO_ONE : relationType;
 	}
 
 	public KanbanCard getSource() {
@@ -84,7 +84,7 @@ public class Connection {
 	}
 
 	public void setRelationType(RelationType relationType) {
-		this.relationType = relationType == null ? RelationType.UNKNOWN : relationType;
+		this.relationType = relationType == null ? RelationType.ONE_TO_ONE : relationType;
 	}
 
 	/**

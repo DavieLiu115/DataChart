@@ -107,8 +107,11 @@ public final class BoardPersistence {
 			if (srcRow < 0 || tgtRow < 0) {
 				continue;
 			}
-			RelationType type = rel.getRelationType() == null
-					? RelationType.UNKNOWN : rel.getRelationType();
+			// 关系类型缺失（旧文件）或为 UNKNOWN 时，统一回退为默认的"一对一"
+			RelationType type = rel.getRelationType();
+			if (type == null || type == RelationType.UNKNOWN) {
+				type = RelationType.ONE_TO_ONE;
+			}
 			addConnection.add(src, srcRow, tgt, tgtRow, type);
 		}
 	}
