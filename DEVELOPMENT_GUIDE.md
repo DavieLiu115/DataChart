@@ -583,3 +583,25 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - **系统宋体 key**：`simsun.ttc,0`（`/ttc` 字体集合取第 0 个 face）需配合 `IDENTITY_H`（Unicode 编码）使用
 - **嵌入级别统一 `NOT_EMBEDDED`**：STSong-Light 是 CID 字体通常不嵌入；simsun 不嵌入则依赖查看方机器字体，如担心跨机显示可改 `EMBEDDED`（会增加文件体积）
 
+### 33. 连线建线后源行用户选中残留（2026-08-04 修复）
+#### 问题
+用户选中 `config_type` 行（橙色 #FE9933）→ 拖到 `invoke_target` 松手建线 → 整条连线变橙色（取源行高亮色）；点击别处后 `invoke_target` 变淡黄（搜索命中），**但 `config_type` 仍是橙色**——用户期望：建线后源行的橙色高亮应该被清空（与连线的"占用色"语义一致，避免视觉混淆）。
+
+#### 根因
+- `KanbanBoard` 列行左键按下 → 进 `pendingConnectionSource` 状态 → 拖动升级为 `isConnecting=true`
+- 升级瞬间**没有调** `toggleRowSelection` 取消源行用户选中
+- 用户列高亮（`highlightedRows` 集合 + `activeHighlightCard/Row`）一直保留，连线建好后整条线仍是橙色
+
+#### 修复
+- **新增私有方法** `clearUserRowSelection(KanbanCard card, int rowIndex)`：从 `card.getHighlightedRows()` 移除该行；若是当前 activeHighlight 则同步 `clearActiveHighlight()`（连带 `relatedRowKeys.clear()`）
+- **`mouseDragged` 升级分支**：升级为 `isConnecting=true` 时调 `clearUserRowSelection(upgradeSource, upgradeRow)`
+- **`mousePressed` 右键列行起手分支**：同样调 `clearUserRowSelection(card, rowIndex)`
+- 不在 `pendingConnectionSource` 未升级（快速点击）路径上调，避免破坏原有"快速点击切换选中"交互（`mouseReleased` 的 `toggleRowSelection` 仍负责）
+
+#### 设计原则
+- **连线建好后源行不应是"用户激活列"**：橙色应该是连线的占用色，不是用户的选中意图
+- **快速点击 vs 拖拽建线 行为分叉**：
+  - 快速点击（没移动）→ `toggleRowSelection`（toggle 语义，可能选中/取消）
+  - 拖拽建线 → `clearUserRowSelection`（强制清掉，避免遗留）
+- **不入 `repaint`**：`clearUserRowSelection` 不主动重绘，由调用方（升级分支/起手分支）按需刷新，避免和现有 `repaint()` 逻辑重复或乱序
+

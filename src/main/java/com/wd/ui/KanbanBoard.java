@@ -341,6 +341,9 @@ public class KanbanBoard extends JPanel {
 								lastHoverTargetCard = null;
 								lastHoverTargetRow = -1;
 								setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
+								// 2026-08-04：起手连线时清除源行用户选中态，
+								// 避免建线后源行保留橙色高亮与连线"占用色"语义冲突
+								clearUserRowSelection(card, rowIndex);
 								repaint();
 							}
 						} else {
@@ -468,8 +471,10 @@ public class KanbanBoard extends JPanel {
 						double dy = e.getY() - pendingConnectionPressPoint.getY();
 						if (dx * dx + dy * dy >= CONNECTION_DRAG_THRESHOLD
 								* (double) CONNECTION_DRAG_THRESHOLD) {
-							connectionSource = pendingConnectionSource;
-							connectionSourceRow = pendingConnectionSourceRow;
+							KanbanCard upgradeSource = pendingConnectionSource;
+							int upgradeRow = pendingConnectionSourceRow;
+							connectionSource = upgradeSource;
+							connectionSourceRow = upgradeRow;
 							connectionCurrentPoint = viewport.transformPoint(e.getPoint());
 							isConnecting = true;
 							lastHoverTargetCard = null;
@@ -478,6 +483,9 @@ public class KanbanBoard extends JPanel {
 							pendingConnectionSource = null;
 							pendingConnectionSourceRow = -2;
 							pendingConnectionPressPoint = null;
+							// 2026-08-04：建线后源行不应保留用户选中的橙色高亮，
+							// 否则会和连线的"占用色"语义冲突（图1 → 图2 现象）。
+							clearUserRowSelection(upgradeSource, upgradeRow);
 							repaint();
 						}
 					}
@@ -1602,6 +1610,25 @@ public class KanbanBoard extends JPanel {
 		this.activeHighlightCard = null;
 		this.activeHighlightRow = -1;
 		relatedRowKeys.clear();
+	}
+
+	/**
+	 * 清除指定卡片的指定行用户选中态（2026-08-04 连线起手时调用）：
+	 * <ul>
+	 *   <li>从卡片的 {@code getHighlightedRows()} 集合移除</li>
+	 *   <li>若该卡该行是当前激活高亮（{@code activeHighlightCard/Row}），同步调 {@link #clearActiveHighlight()}</li>
+	 * </ul>
+	 * 不调用 {@link #repaint()}，由调用方按需统一刷新；不切换光标，连线模式下由调用方维持 CROSSHAIR。
+	 */
+	private void clearUserRowSelection(KanbanCard card, int rowIndex) {
+		if (card == null || rowIndex < 0) {
+			return;
+		}
+		java.util.Set<Integer> highlighted = card.getHighlightedRows();
+		if (highlighted.remove(rowIndex)
+				&& activeHighlightCard == card && activeHighlightRow == rowIndex) {
+			clearActiveHighlight();
+		}
 	}
 
 	/**
