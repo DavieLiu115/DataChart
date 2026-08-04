@@ -37,8 +37,11 @@ public class BoardViewport {
 	/** 滚轮平移灵敏度（像素 / 滚轮单位） */
 	private static final double PAN_SENSITIVITY = 20;
 
-	/** focus 时内容左上角距视口左上角的留白（屏幕像素） */
+	/** focus 时内容左上角距视口左上角的留白（屏幕像素，内容能完整展示时的留白） */
 	private static final double FOCUS_PADDING = 20;
+
+	/** focus 时内容超出视口、左对齐场景下的左侧留白（屏幕像素，更大便于查看） */
+	private static final double FOCUS_PADDING_LEFT = 80;
 
 	/**
 	 * 复位视图（位置 + 缩放 = 回到 100% 且居中无偏移）
@@ -114,12 +117,16 @@ public class BoardViewport {
 	}
 
 	/**
-	 * 把所有卡片整体"左上对齐"到视口，保留当前缩放倍率。
+	 * 把所有卡片整体对齐到视口，保留当前缩放倍率。
 	 *
 	 * <p>无卡片时不改变视图。</p>
 	 *
-	 * <p>对齐策略：让内容包围盒的左上角落到视口的 {@value #FOCUS_PADDING} 屏幕像素处。
-	 * 这样最左 / 最上的卡片一定完整露出；右侧 / 下方超出部分不做缩放、由用户滚动查看。</p>
+	 * <p>对齐策略（自适应）：</p>
+	 * <ul>
+	 *   <li><b>能完整展示</b>（内容宽 ≤ 视口宽 且 内容高 ≤ 视口高）：上下左右居中</li>
+	 *   <li><b>展示不完</b>（宽或高超限）：<b>左对齐 + 上下居中</b>，左侧留白用更大的
+	 *       {@value #FOCUS_PADDING_LEFT}，保证最左卡片完整露出且不贴边；右侧/下方超出由用户滚动查看</li>
+	 * </ul>
 	 *
 	 * @param cards       卡片列表
 	 * @param viewWidth   视口宽（屏幕坐标）
@@ -151,15 +158,38 @@ public class BoardViewport {
 			}
 		}
 
-		// 2. 让内容包围盒左上角 (minX, minY) 落到视口 (FOCUS_PADDING, FOCUS_PADDING)
-		double targetScreenX = FOCUS_PADDING;
-		double targetScreenY = FOCUS_PADDING;
-		double currentScreenX = minX * zoomFactor + transform.getTranslateX();
-		double currentScreenY = minY * zoomFactor + transform.getTranslateY();
+		// 内容在屏幕上的宽 / 高（画板尺寸 × zoom）
+		double contentW = (maxX - minX) * zoomFactor;
+		double contentH = (maxY - minY) * zoomFactor;
 
-		// 3. 反推 translate，让 (minX, minY) 落到目标屏幕点
-		double dx = targetScreenX - currentScreenX;
-		double dy = targetScreenY - currentScreenY;
+		// 是否能在视口内完整展示（加上基础留白后仍放得下）
+		boolean fits = contentW <= viewWidth - 2 * FOCUS_PADDING
+				&& contentH <= viewHeight - 2 * FOCUS_PADDING;
+
+		double targetScreenX;
+		double targetScreenY;
+		double contentCenterX = (minX + maxX) / 2.0;
+		double contentCenterY = (minY + maxY) / 2.0;
+		double viewCenterX = viewWidth / 2.0;
+		double viewCenterY = viewHeight / 2.0;
+
+		// 内容中心当前在屏幕上的位置
+		double curCenterScreenX = contentCenterX * zoomFactor + transform.getTranslateX();
+		double curCenterScreenY = contentCenterY * zoomFactor + transform.getTranslateY();
+
+		double dx;
+		double dy;
+		if (fits) {
+			// 情况 A：能完整展示 → 上下左右居中：内容中心落到视口中心
+			dx = viewCenterX - curCenterScreenX;
+			dy = viewCenterY - curCenterScreenY;
+		} else {
+			// 情况 B：展示不完 → 左对齐 + 上下居中，左侧留白更大
+			// 左对齐：内容 minX 落到 FOCUS_PADDING_LEFT（最左卡片不贴边）
+			dx = FOCUS_PADDING_LEFT - (minX * zoomFactor + transform.getTranslateX());
+			// 上下居中：内容垂直中心落到视口垂直中心
+			dy = viewCenterY - curCenterScreenY;
+		}
 		transform.translate(dx / zoomFactor, dy / zoomFactor);
 		return true;
 	}

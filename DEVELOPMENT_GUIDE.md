@@ -204,16 +204,18 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 
 #### Focus 按钮（focusButton）
 - 位置：工具栏第 2 列（紧跟搜索框），图标用 `PluginIcons.reset`（"复位/居中"视觉语义）
-- 点击 → `KanbanBoard.focusView()`：**保留当前 zoom**，计算所有卡片 bounds 合并矩形的**左上角**，平移 transform 让 `minX/minY` 落到视口左上角 + `FOCUS_PADDING(20)` 处
-- 对齐策略（2026-08-04）：**左上对齐**而非几何居中。保证最左/最上卡片完整露出；右侧/下方超出部分不做缩放、由用户滚动查看
-- 与 `resetView()` 的区别：reset 是 zoom=100% + transform 清零（完全重置）；focus 是"画板内容回到视口左上方"，zoom 不变
+- 点击 → `KanbanBoard.focusView()`：**保留当前 zoom**，平移 transform 让内容对齐到视口
+- 对齐策略（2026-08-04 自适应）：
+  - **能完整展示**（内容宽 ≤ 视口宽 且 内容高 ≤ 视口高，含 `FOCUS_PADDING(20)` 基础留白）：**上下左右居中**
+  - **展示不完**（宽或高超限）：**左对齐 + 上下居中**，内容 `minX` 落到 `FOCUS_PADDING_LEFT(80)`（更大留白），保证最左卡片完整露出不贴边；右侧/下方超出由用户滚动查看
+- 与 `resetView()` 的区别：reset 是 zoom=100% + transform 清零（完全重置）；focus 是"画板内容回到视口合适位置"，zoom 不变
 - 无卡片时不改变视图
 
 #### OneOne 按钮（oneOneButton，缩放 1:1）
 - 位置：工具栏，文案 "1:1"，图标 `PluginIcons.oneOne`
 - 点击 → `KanbanBoard.setZoomTo1()` + `focusView()`：
   - `setZoomTo1()`：调 `viewport.setZoomFactor(viewCenterX, viewCenterY)`，直接设缩放=1.0（复用 `zoom()`，scaleFactor = `1/当前zoom`，以视口中心为锚点）
-  - `focusView()`：再把最左/最上卡片对齐到视口左上角 + `FOCUS_PADDING`
+  - `focusView()`：自适应对齐（能展示完居中，否则最左对齐）
 - `BoardViewport.setZoomFactor`：直接设缩放因子，保持屏幕中心锚定内容不变
 
 #### FullScreen 按钮（fullScreamButton）

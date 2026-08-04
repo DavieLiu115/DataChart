@@ -917,7 +917,8 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 把所有卡片整体"左上对齐"到视口（保留当前缩放倍率，最左卡片完整露出）。
+	 * 把所有卡片整体对齐到视口（保留当前缩放倍率）。
+	 * <p>自适应策略：能完整展示则上下左右居中；展示不完则左对齐 + 上下居中，最左卡片完整露出。</p>
 	 */
 	public void focusView() {
 		Rectangle view = getVisibleRect();

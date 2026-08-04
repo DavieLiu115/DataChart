@@ -99,7 +99,7 @@ public class DataChartView extends DialogWrapper {
 	 */
 	private void setupToolBarButtons() {
 		if (focusButton != null) {
-			focusButton.setToolTipText("聚焦画板（保留缩放，最左/最上卡片对齐显示）");
+			focusButton.setToolTipText("聚焦画板（保留缩放，能展示完则居中，否则最左对齐）");
 			focusButton.addActionListener(e -> {
 				if (kanbanBoard != null) {
 					kanbanBoard.focusView();
@@ -371,7 +371,7 @@ public class DataChartView extends DialogWrapper {
 				kanbanBoard.clearSearch();
 			}
 			updateSearchStatusLabel();
-			// 打开文件后自动"左上对齐"显示所有卡片（等价于点击 Focus 按钮），
+			// 打开文件后自动聚焦所有卡片（等价于点击 Focus 按钮），
 			// 延迟到组件布局完成后再执行，保证视口尺寸正确
 			javax.swing.SwingUtilities.invokeLater(() -> {
 				if (kanbanBoard != null) {
