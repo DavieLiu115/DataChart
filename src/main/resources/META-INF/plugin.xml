@@ -38,8 +38,9 @@
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
     <depends>com.intellij.modules.platform</depends>
 
-    <!-- Database 插件是 Ultimate 版才有，声明为可选依赖，运行时动态检查 -->
-    <depends optional="true">com.intellij.database</depends>
+    <!-- Database 插件是 Ultimate 版才有，声明为可选依赖，运行时动态检查。
+         config-file 指向仅在 Database 插件存在时才加载的扩展声明文件 -->
+    <depends optional="true" config-file="databasePlugin.xml">com.intellij.database</depends>
 
     <idea-version since-build="223"/>
 

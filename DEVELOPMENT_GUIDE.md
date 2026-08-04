@@ -61,7 +61,9 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 所有文件扩展名统一用 `DataToolsFileType.EXTENSION = "datachart"` 常量，避免硬编码导致大小写不一致（曾导致 `getDefaultExtension()` 返回 `"dataChart"` 与注册的 `"datachart"` 不一致，使右键 New 菜单不显示文件类型）。
 
 ### 10. Database 插件集成（可选依赖 + 反射）
-- Database 插件仅 Ultimate 版提供，集成时必须用 `<depends optional="true">com.intellij.database</depends>`
+- Database 插件仅 Ultimate 版提供，集成时必须用 `<depends optional="true" config-file="databasePlugin.xml">com.intellij.database</depends>`
+  - `config-file` 属性必须声明（插件校验器要求），指向同目录 `META-INF/databasePlugin.xml`（Database 插件存在时才加载的扩展声明文件）
+  - 本插件对 Database 的访问全走反射 + 运行时检查，`databasePlugin.xml` 目前仅含 `<idea-plugin>` 头占位，不迁移任何扩展点；若后续引入直接引用 Database API 的扩展点，必须放进该文件而非 plugin.xml
 - 反射访问关键类（避免 ClassNotFoundException）：
   - `com.intellij.database.psi.DbPsiFacade` - 入口
   - `com.intellij.database.psi.DbDataSource` - 数据源
