@@ -904,7 +904,20 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 把所有卡片整体居中到视口中心，保留当前缩放倍率。
+	 * 把缩放倍率直接设为 1:1（保持视口中心锚定，缩放后不变）。
+	 */
+	public void setZoomTo1() {
+		Rectangle view = getVisibleRect();
+		double cx = view.getX() + view.getWidth() / 2.0;
+		double cy = view.getY() + view.getHeight() / 2.0;
+		if (viewport.setZoomFactor(cx, cy)) {
+			notifyViewChanged();
+			repaint();
+		}
+	}
+
+	/**
+	 * 把所有卡片整体"左上对齐"到视口（保留当前缩放倍率，最左卡片完整露出）。
 	 */
 	public void focusView() {
 		Rectangle view = getVisibleRect();

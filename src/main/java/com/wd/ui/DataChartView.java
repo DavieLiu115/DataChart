@@ -38,6 +38,7 @@ public class DataChartView extends DialogWrapper {
 	private JPanel dataView;
 	private JButton focusButton;
 	private JButton donateButton;
+	private JButton oneOneButton;
 	private KanbanBoard kanbanBoard;
 	private Project project;
 
@@ -82,6 +83,7 @@ public class DataChartView extends DialogWrapper {
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
 		focusButton.setIcon(PluginIcons.autoLayout);
 		focusButton.setText("Focus");
+		oneOneButton.setIcon(PluginIcons.oneOne);
 		donateButton.setIcon(PluginIcons.Donation);
 		donateButton.setRolloverIcon(PluginIcons.Donation_Enter);
 		donateButton.setContentAreaFilled(false);
@@ -97,18 +99,28 @@ public class DataChartView extends DialogWrapper {
 	 */
 	private void setupToolBarButtons() {
 		if (focusButton != null) {
-			focusButton.setToolTipText("聚焦画板（保留缩放，居中显示）");
+			focusButton.setToolTipText("聚焦画板（保留缩放，最左/最上卡片对齐显示）");
 			focusButton.addActionListener(e -> {
 				if (kanbanBoard != null) {
 					kanbanBoard.focusView();
 				}
 			});
 		}
-		//if (fullScreamButton != null) {
-		//	fullScreamButton.setToolTipText("进入全屏模式");
-		//	fullScreamButton.addActionListener(e -> toggleFullScreen());
-		//}
-		if (exportPDFButton != null) {
+	//if (fullScreamButton != null) {
+	//	fullScreamButton.setToolTipText("进入全屏模式");
+	//	fullScreamButton.addActionListener(e -> toggleFullScreen());
+	//}
+	if (oneOneButton != null) {
+		oneOneButton.setToolTipText("缩放为 1:1，并聚焦到最左/最上卡片");
+		oneOneButton.addActionListener(e -> {
+			if (kanbanBoard != null) {
+				// 先调整缩放比为 1:1，再 focus 调整位置（最左/最上卡片对齐显示）
+				kanbanBoard.setZoomTo1();
+				kanbanBoard.focusView();
+			}
+		});
+	}
+	if (exportPDFButton != null) {
 			exportPDFButton.setToolTipText("导出为 PDF 文件");
 			exportPDFButton.addActionListener(e -> exportAsPdf());
 		}
@@ -359,7 +371,7 @@ public class DataChartView extends DialogWrapper {
 				kanbanBoard.clearSearch();
 			}
 			updateSearchStatusLabel();
-			// 打开文件后自动居中所有卡片（等价于点击 Focus 按钮），
+			// 打开文件后自动"左上对齐"显示所有卡片（等价于点击 Focus 按钮），
 			// 延迟到组件布局完成后再执行，保证视口尺寸正确
 			javax.swing.SwingUtilities.invokeLater(() -> {
 				if (kanbanBoard != null) {

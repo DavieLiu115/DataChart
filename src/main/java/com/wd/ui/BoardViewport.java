@@ -37,12 +37,30 @@ public class BoardViewport {
 	/** 滚轮平移灵敏度（像素 / 滚轮单位） */
 	private static final double PAN_SENSITIVITY = 20;
 
+	/** focus 时内容左上角距视口左上角的留白（屏幕像素） */
+	private static final double FOCUS_PADDING = 20;
+
 	/**
 	 * 复位视图（位置 + 缩放 = 回到 100% 且居中无偏移）
 	 */
 	public void reset() {
 		transform = new AffineTransform();
 		zoomFactor = 1.0;
+	}
+
+	/**
+	 * 直接把缩放因子设为指定值，保持屏幕中心点对应的画板位置不变。
+	 *
+	 * <p>用于"1:1"等精确缩放需求（如 oneOne 按钮）。缩放后不改变视口中心锚定内容，
+	 * 因此用户看到的画面中心不变，只是整体放大/缩小。</p>
+	 *
+	 * @param viewCenterX 屏幕中心 X（用于锚定）
+	 * @param viewCenterY 屏幕中心 Y（用于锚定）
+	 * @return 是否生效（目标缩放越界时返回 false）
+	 */
+	public boolean setZoomFactor(double viewCenterX, double viewCenterY) {
+		return zoom(new Point2D.Double(viewCenterX, viewCenterY),
+				1.0 / zoomFactor); // scaleFactor = target/current
 	}
 
 	/**
@@ -96,9 +114,12 @@ public class BoardViewport {
 	}
 
 	/**
-	 * 把所有卡片整体居中到视口中心，保留当前缩放倍率。
+	 * 把所有卡片整体"左上对齐"到视口，保留当前缩放倍率。
 	 *
 	 * <p>无卡片时不改变视图。</p>
+	 *
+	 * <p>对齐策略：让内容包围盒的左上角落到视口的 {@value #FOCUS_PADDING} 屏幕像素处。
+	 * 这样最左 / 最上的卡片一定完整露出；右侧 / 下方超出部分不做缩放、由用户滚动查看。</p>
 	 *
 	 * @param cards       卡片列表
 	 * @param viewWidth   视口宽（屏幕坐标）
@@ -109,7 +130,7 @@ public class BoardViewport {
 		if (cards == null || cards.isEmpty()) {
 			return false;
 		}
-		// 1. 计算所有卡片的合并包围盒中心（画板坐标）
+		// 1. 计算所有卡片的合并包围盒（画板坐标）
 		double minX = Double.POSITIVE_INFINITY;
 		double minY = Double.POSITIVE_INFINITY;
 		double maxX = Double.NEGATIVE_INFINITY;
@@ -129,20 +150,16 @@ public class BoardViewport {
 				maxY = b.getY() + b.getHeight();
 			}
 		}
-		double contentCenterX = (minX + maxX) / 2.0;
-		double contentCenterY = (minY + maxY) / 2.0;
 
-		// 2. 视口中心（屏幕坐标）
-		double viewCenterX = viewWidth / 2.0;
-		double viewCenterY = viewHeight / 2.0;
+		// 2. 让内容包围盒左上角 (minX, minY) 落到视口 (FOCUS_PADDING, FOCUS_PADDING)
+		double targetScreenX = FOCUS_PADDING;
+		double targetScreenY = FOCUS_PADDING;
+		double currentScreenX = minX * zoomFactor + transform.getTranslateX();
+		double currentScreenY = minY * zoomFactor + transform.getTranslateY();
 
-		// 3. 当前 contentCenter 在屏幕上的位置
-		double currentScreenX = contentCenterX * zoomFactor + transform.getTranslateX();
-		double currentScreenY = contentCenterY * zoomFactor + transform.getTranslateY();
-
-		// 4. 反推 translate，让 contentCenter 落到 viewCenter
-		double dx = viewCenterX - currentScreenX;
-		double dy = viewCenterY - currentScreenY;
+		// 3. 反推 translate，让 (minX, minY) 落到目标屏幕点
+		double dx = targetScreenX - currentScreenX;
+		double dy = targetScreenY - currentScreenY;
 		transform.translate(dx / zoomFactor, dy / zoomFactor);
 		return true;
 	}

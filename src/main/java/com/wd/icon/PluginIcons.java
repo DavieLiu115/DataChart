@@ -37,6 +37,8 @@ public class PluginIcons {
     public static final Icon Donation = load("/icons/donation.svg");
     public static final Icon Donation_Enter = load("/icons/donation_enter.svg");
 
+    public static final Icon oneOne = load("/icons/oneOne.svg");
+
     public static Icon load(String iconPath) {
         return IconLoader.getIcon(iconPath, PluginIcons.class);
     }
