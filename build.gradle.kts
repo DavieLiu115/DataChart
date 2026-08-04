@@ -20,8 +20,8 @@ intellij {
 //    version.set("2023.2.6")
 //    type.set("IU") // Target IDE Platform
     intellij.updateSinceUntilBuild = false
-//    localPath.set("/Users/lww/Downloads/ideaJar/ideaIU-2023.2.6")
-    localPath.set("E:\\ideac\\ideaIU-2023.2.6")
+    localPath.set("/Users/lww/Downloads/ideaJar/ideaIU-2023.2.6")
+//    localPath.set("E:\\ideac\\ideaIU-2023.2.6")
     plugins.set(
         listOf(
             /* Plugin Dependencies */
@@ -35,21 +35,11 @@ intellij {
 }
 
 dependencies {
-    compileOnly("org.projectlombok:lombok:1.18.24")
-    annotationProcessor("org.projectlombok:lombok:1.18.24")
-
-    implementation("log4j:log4j:1.2.17")
     implementation("com.alibaba:fastjson:1.2.83")
-    implementation("commons-io:commons-io:2.18.0")
-    implementation("org.apache.commons:commons-lang3:3.12.0")
 
     // pdf
     implementation("com.itextpdf:itextpdf:5.5.13")
     implementation("com.itextpdf:itext-asian:5.2.0")
-
-    // Image processing optimization
-    implementation("com.twelvemonkeys.imageio:imageio-core:3.10.1")
-    implementation("com.twelvemonkeys.imageio:imageio-jpeg:3.10.1")
 }
 
 tasks {
