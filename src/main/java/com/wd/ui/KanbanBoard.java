@@ -1781,21 +1781,52 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 重新计算关联列集合。
+	 * 重新计算关联列集合（2026-08-07 改为 BFS 沿连线图遍历）：
+	 * <p>从选中的 (activeHighlightCard, activeHighlightRow) 出发，
+	 * 沿 {@link #connections} 双向遍历所有可达的 (card, row) 端点，
+	 * 加入 {@link #relatedRowKeys}。渲染时这些行统一用 {@link #RELATED_ROW_COLOR}
+	 * 高亮，覆盖默认的"连线占用色"（紫色）。</p>
+	 *
+	 * <p>连通图遍历的语义：选一行 → 它所在连通子图里所有"被连线涉及的行"都变橙。
+	 * 不属于该连通子图的孤立连线行不受影响。</p>
 	 */
 	private void refreshRelatedRows() {
 		relatedRowKeys.clear();
 		if (activeHighlightCard == null || activeHighlightRow < 0) {
 			return;
 		}
+		// 构造 (cardId, row) → 邻接端点列表
+		java.util.Map<String, java.util.List<RelatedRowPos>> adjacency = new java.util.HashMap<>();
 		for (Connection conn : connections) {
-			if (conn.getSource() == activeHighlightCard
-					&& conn.getSourceRow() == activeHighlightRow) {
-				relatedRowKeys.add(makeRelatedKey(conn.getTarget(), conn.getTargetRow()));
+			String srcKey = makeRelatedKey(conn.getSource(), conn.getSourceRow());
+			String tgtKey = makeRelatedKey(conn.getTarget(), conn.getTargetRow());
+			adjacency.computeIfAbsent(srcKey, k -> new java.util.ArrayList<>())
+					.add(new RelatedRowPos(conn.getTarget(), conn.getTargetRow()));
+			adjacency.computeIfAbsent(tgtKey, k -> new java.util.ArrayList<>())
+					.add(new RelatedRowPos(conn.getSource(), conn.getSourceRow()));
+		}
+
+		// BFS：从选中端点出发，遍历连通子图
+		java.util.Deque<RelatedRowPos> queue = new java.util.ArrayDeque<>();
+		java.util.Set<String> visited = new java.util.HashSet<>();
+		String startKey = makeRelatedKey(activeHighlightCard, activeHighlightRow);
+		queue.add(new RelatedRowPos(activeHighlightCard, activeHighlightRow));
+		visited.add(startKey);
+		relatedRowKeys.add(startKey);
+
+		while (!queue.isEmpty()) {
+			RelatedRowPos cur = queue.poll();
+			String curKey = makeRelatedKey(cur.card, cur.row);
+			java.util.List<RelatedRowPos> neighbours = adjacency.get(curKey);
+			if (neighbours == null) {
+				continue;
 			}
-			if (conn.getTarget() == activeHighlightCard
-					&& conn.getTargetRow() == activeHighlightRow) {
-				relatedRowKeys.add(makeRelatedKey(conn.getSource(), conn.getSourceRow()));
+			for (RelatedRowPos nb : neighbours) {
+				String nbKey = makeRelatedKey(nb.card, nb.row);
+				if (visited.add(nbKey)) {
+					relatedRowKeys.add(nbKey);
+					queue.add(nb);
+				}
 			}
 		}
 	}

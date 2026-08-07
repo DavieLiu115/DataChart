@@ -699,3 +699,22 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 - **focusOn 的入参 viewWidth/viewHeight 必须有非零校验**：否则会把内容中心对齐到 (0, 0) 产生灾难性偏移
 - **监听器注册后必须管理生命周期**：跨多次 `loadFromJson` 累积、dispose 时清理，是 Swing 组件的标准做法
 
+### 38. 选中行后所有连通图行变橙（2026-08-07）
+#### 现象
+左键选中某行（如 `sys_user.id`），希望所有"有连接关系"的行都变成选中色 #FD9933（橙），但 `sys_menu.parent_id` 这类"连通图内但不是直接邻居"的行仍显示为连线占用色（紫色）。
+
+#### 原因
+`refreshRelatedRows` 只遍历**直接邻居**（一阶 BFS），不沿连线图递归。所以 sys_menu.parent_id 这样的间接连通行留在 linkedRowsCache 渲染的紫色（连线自身颜色）。
+
+#### 修复
+`refreshRelatedRows` 改为**完整 BFS 沿 `connections` 双向遍历**：
+- 构造 `Map<endpointKey, List<RelatedRowPos>>` 邻接表
+- 从 `(activeHighlightCard, activeHighlightRow)` 出发 BFS，所有可达的 `(card, row)` 加入 `relatedRowKeys`
+- 渲染时 `relatedRowKeys` 已统一用 `RELATED_ROW_COLOR`（橙色），覆盖默认的连线占用色
+- 复用现有 `RelatedRowPos` + `makeRelatedKey`，不引入新数据结构
+
+#### 设计原则
+- **"选中一个，所有连通行都高亮"是图遍历语义**：一阶邻居不够，必须 BFS/DFS 整个连通子图
+- **复用现有数据结构**：BFS 状态直接用 `RelatedRowPos`，key 用 `makeRelatedKey`，与渲染路径同源，避免新旧 key 不匹配
+- **连通子图边界**：不属于该连通子图的孤立连线行不受影响（用户只关注选中的那张网络）
+
