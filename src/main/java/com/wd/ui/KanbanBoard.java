@@ -934,6 +934,22 @@ public class KanbanBoard extends JPanel {
 		}
 	}
 
+	/**
+	 * 2026-08-07 新增：缩放到能完整展示所有卡片并居中（Fit to Window）。
+	 * <p>与 {@link #focusView()} 的区别：focusView 保留缩放只移动位置，
+	 * 本方法会重新计算缩放让全部卡片落入视口后再居中。</p>
+	 */
+	public void fitView() {
+		Rectangle view = getVisibleRect();
+		if (view.getWidth() <= 0 || view.getHeight() <= 0) {
+			return;
+		}
+		if (viewport.fit(cards, (int) view.getWidth(), (int) view.getHeight())) {
+			notifyViewChanged();
+			repaint();
+		}
+	}
+
 	public double getZoomFactor() {
 		return viewport.getZoomFactor();
 	}

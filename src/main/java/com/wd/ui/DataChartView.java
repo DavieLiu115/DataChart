@@ -39,6 +39,7 @@ public class DataChartView extends DialogWrapper {
 	private JLabel zoomPercentLabel;
 	private JPanel dataView;
 	private JButton focusButton;
+	private JButton fitButton;
 	private JButton donateButton;
 	private JButton oneOneButton;
 	private KanbanBoard kanbanBoard;
@@ -84,8 +85,9 @@ public class DataChartView extends DialogWrapper {
 		exportPictureButton.setIcon(PluginIcons.image);
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
 		focusButton.setIcon(PluginIcons.autoLayout);
-		focusButton.setText("Focus");
+		focusButton.setText("Recenter");
 		oneOneButton.setText("100%");
+		fitButton.setIcon(PluginIcons.fitContent);
 		donateButton.setIcon(PluginIcons.Donation);
 		donateButton.setRolloverIcon(PluginIcons.Donation_Enter);
 		donateButton.setContentAreaFilled(false);
@@ -100,14 +102,22 @@ public class DataChartView extends DialogWrapper {
 	 * 给工具栏按钮挂监听
 	 */
 	private void setupToolBarButtons() {
-		if (focusButton != null) {
-			focusButton.setToolTipText("聚焦画板（保留缩放，能展示完则居中，否则最左对齐）");
-			focusButton.addActionListener(e -> {
-				if (kanbanBoard != null) {
-					kanbanBoard.focusView();
-				}
-			});
-		}
+	if (focusButton != null) {
+		focusButton.setToolTipText("Recenter：保持当前缩放，只把画板内容重新居中到视口");
+		focusButton.addActionListener(e -> {
+			if (kanbanBoard != null) {
+				kanbanBoard.focusView();
+			}
+		});
+	}
+	if (fitButton != null) {
+		fitButton.setToolTipText("缩放 + 居中：缩放到能完整显示所有卡片，再居中");
+		fitButton.addActionListener(e -> {
+			if (kanbanBoard != null) {
+				kanbanBoard.fitView();
+			}
+		});
+	}
 	//if (fullScreamButton != null) {
 	//	fullScreamButton.setToolTipText("进入全屏模式");
 	//	fullScreamButton.addActionListener(e -> toggleFullScreen());

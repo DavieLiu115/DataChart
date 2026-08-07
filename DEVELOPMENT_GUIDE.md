@@ -705,6 +705,25 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 - 与 `Focus` 按钮职责正交：`100%` = 改缩放，`Focus` = 改位置
 - tooltip 同步为 "缩放到 100%（保持当前画板位置不动）"
 
+### 38.2 新增 Fit 按钮（缩放 + 居中显示完，2026-08-07）
+- 用户需求："缩放 + 居中显示完"（Fit to Window）按钮
+- 新增 `BoardViewport.fit(List<KanbanCard>, int viewWidth, int viewHeight)`：
+  - 计算所有卡片合并包围盒（画板坐标）
+  - 按 `min(availW/contentW, availH/contentH)` 求目标缩放（限制在 [MIN_ZOOM, MAX_ZOOM]）
+  - 以视口中心为锚缩放，再居中（内容中心落到视口中心）
+- 新增 `KanbanBoard.fitView()`：调 `viewport.fit` + notifyViewChanged + repaint（含 viewWidth 零值防御）
+- 新增 `DataChartView.fitButton`（Fit 按钮，form 布局 column 3，column-count 8→9，原列号整体+1）
+- 三个按钮职责正交：
+  - `100%` = 只改缩放
+  - `Recenter` = 只改位置（保留缩放）【原 Focus，2026-08-07 改名，语义"保持缩放只居中"】
+  - `Fit` = 改缩放到适配 + 居中（组合）
+
+### 38. 选中行后所有连通图行变橙（2026-08-07）
+- 原 `1:1` 按钮 = 缩放 100% + focus 居中（组合操作），职责不纯，易误导
+- 改为：文字 `100%`（去掉图标），行为**只缩放到 100%，不动位置**（以视口中心为锚，保持视野中心稳定）
+- 与 `Focus` 按钮职责正交：`100%` = 改缩放，`Focus` = 改位置
+- tooltip 同步为 "缩放到 100%（保持当前画板位置不动）"
+
 ### 38. 选中行后所有连通图行变橙（2026-08-07）
 #### 现象
 左键选中某行（如 `sys_user.id`），希望所有"有连接关系"的行都变成选中色 #FD9933（橙），但 `sys_menu.parent_id` 这类"连通图内但不是直接邻居"的行仍显示为连线占用色（紫色）。

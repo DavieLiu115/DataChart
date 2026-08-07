@@ -213,6 +213,60 @@ public class BoardViewport {
 	}
 
 	/**
+	 * 缩放到能完整展示所有卡片，并居中（Fit to Window）。
+	 *
+	 * <p>与 {@link #focusOn} 的区别：focusOn 保留当前缩放只移动位置；
+	 * 本方法会<b>重新计算缩放比例</b>，让所有卡片加上留白后完整落入视口内，再居中。</p>
+	 *
+	 * @param cards      卡片列表
+	 * @param viewWidth  视口宽（屏幕坐标）
+	 * @param viewHeight 视口高（屏幕坐标）
+	 * @return 是否有卡片（false 表示无卡片，视图未改变）
+	 */
+	public boolean fit(List<KanbanCard> cards, int viewWidth, int viewHeight) {
+		if (cards == null || cards.isEmpty() || viewWidth <= 0 || viewHeight <= 0) {
+			return false;
+		}
+		// 1. 计算所有卡片的合并包围盒（画板坐标）
+		double minX = Double.POSITIVE_INFINITY;
+		double minY = Double.POSITIVE_INFINITY;
+		double maxX = Double.NEGATIVE_INFINITY;
+		double maxY = Double.NEGATIVE_INFINITY;
+		for (KanbanCard card : cards) {
+			Rectangle2D b = card.getBounds();
+			minX = Math.min(minX, b.getX());
+			minY = Math.min(minY, b.getY());
+			maxX = Math.max(maxX, b.getX() + b.getWidth());
+			maxY = Math.max(maxY, b.getY() + b.getHeight());
+		}
+
+		// 2. 计算能完整放入视口（含留白）的缩放比例，限制在 [MIN_ZOOM, MAX_ZOOM]
+		double contentW = maxX - minX;
+		double contentH = maxY - minY;
+		double availW = viewWidth - 2 * FOCUS_PADDING;
+		double availH = viewHeight - 2 * FOCUS_PADDING;
+		double scaleX = contentW <= 0 ? 1.0 : availW / contentW;
+		double scaleY = contentH <= 0 ? 1.0 : availH / contentH;
+		double targetZoom = Math.min(scaleX, scaleY);
+		targetZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, targetZoom));
+
+		// 3. 应用缩放（以视口中心为锚，避免内容跑到视野外）
+		zoom(new Point2D.Double(viewWidth / 2.0, viewHeight / 2.0),
+				targetZoom / zoomFactor);
+
+		// 4. 居中：内容中心（画板）落到视口中心
+		double contentCenterX = (minX + maxX) / 2.0;
+		double contentCenterY = (minY + maxY) / 2.0;
+		double viewCenterX = viewWidth / 2.0;
+		double viewCenterY = viewHeight / 2.0;
+		double curCenterScreenX = contentCenterX * zoomFactor + transform.getTranslateX();
+		double curCenterScreenY = contentCenterY * zoomFactor + transform.getTranslateY();
+		transform.translate((viewCenterX - curCenterScreenX) / zoomFactor,
+				(viewCenterY - curCenterScreenY) / zoomFactor);
+		return true;
+	}
+
+	/**
 	 * 屏幕坐标转换为画板坐标。
 	 */
 	public Point2D transformPoint(Point2D screenPoint) {
