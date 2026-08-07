@@ -657,3 +657,21 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - **加载时检测 + 补 UUID**：保证旧文件首次打开也不会让用户重画所有连线
 - **持久化 in-memory model**：补 UUID 后立即 `model.setId(newId)`，下次保存就把规范化结果写回 JSON，**用户感知到的恢复是「保存一次就好」**
 
+### 36. 同步表结构后连线列重定位（2026-08-07）
+#### 问题
+`KanbanBoard.syncTableStructure`（表头右键"同步表结构"）用 `card.setTableInfoWithDiff(fresh, ...)` 替换 TableInfo，但 `Connection.sourceRow/targetRow` 存的是**列 index**。同步后列顺序可能变化（增删列），沿用旧 index 会让连线指向错误列——与第 13 节"删除列后 index 错位"同源。
+- 持久化（load/save）路径已用 `fromColumnName/toColumnName` 列名解决（13 节）
+- 但 **syncTableStructure 运行态路径没有列名重定位**，是遗漏
+
+#### 修复
+- **`Connection.sourceRow/targetRow`** 从 `final` 放开为可变，新增 `setSourceRow(int)` / `setTargetRow(int)`
+- **`KanbanBoard.syncTableStructure`** 替换表结构前遍历所有连线，记录「涉及该卡片的连线 → 旧列 index」；替换后用 `findColumnIndex(fresh, 旧列名)` 重新定位：
+  - 列仍存在 → `conn.setSourceRow/setTargetRow(newRow)`
+  - 列被删除 → 移除该连线（并清空 `selectedConnection`、失效 `linkedRowsCache`）
+- 辅助方法：`oldRowToColumnName(TableInfo)`（行 index→列名）、`findColumnIndex(TableInfo, colName)`
+- 通知文案附带"已移除 N 条失效连线"
+
+#### 设计原则
+- **所有引用列 index 的地方，在表结构变化后都要用列名重定位**（持久化 13 节 + 运行态 36 节两条路径都已覆盖）
+- 列被删除的连线直接丢弃（列都不存在了，连线语义失效），不要静默保留指向错误列
+

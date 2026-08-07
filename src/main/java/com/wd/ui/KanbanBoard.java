@@ -1459,11 +1459,103 @@ public class KanbanBoard extends JPanel {
 					"无法获取表结构：" + tableName + "（数据源：" + dsName + "）");
 			return;
 		}
+
+		// 2026-08-07 修复：替换表结构前先记录涉及该卡片的连线的列名，
+		// 替换后用列名重新定位连线行 index（Connection.sourceRow/targetRow 存的是列 index，
+		// 同步后列顺序可能变化，直接沿用 index 会导致连线指向错误列）
+		java.util.Map<Connection, Integer> sourceRowByColName = new java.util.HashMap<>();
+		java.util.Map<Connection, Integer> targetRowByColName = new java.util.HashMap<>();
+		for (Connection conn : connections) {
+			if (conn.getSource() == card) {
+				sourceRowByColName.put(conn, conn.getSourceRow());
+			}
+			if (conn.getTarget() == card) {
+				targetRowByColName.put(conn, conn.getTargetRow());
+			}
+		}
+
 		card.setTableInfoWithDiff(fresh, this::repaint);
+
+		// 用旧列名重新定位连线行（只对仍存在的列重定位；被删除的列则丢弃该连线）
+		java.util.Map<Integer, String> oldRowToName = oldRowToColumnName(old);
+		java.util.List<Connection> toRemove = new java.util.ArrayList<>();
+		for (java.util.Map.Entry<Connection, Integer> e : sourceRowByColName.entrySet()) {
+			Connection conn = e.getKey();
+			String colName = oldRowToName.get(e.getValue());
+			if (colName == null) {
+				toRemove.add(conn);
+				continue;
+			}
+			int newRow = findColumnIndex(fresh, colName);
+			if (newRow < 0) {
+				toRemove.add(conn); // 该列已被删除，连线无法保留
+			} else {
+				conn.setSourceRow(newRow);
+			}
+		}
+		for (java.util.Map.Entry<Connection, Integer> e : targetRowByColName.entrySet()) {
+			Connection conn = e.getKey();
+			String colName = oldRowToName.get(e.getValue());
+			if (colName == null) {
+				toRemove.add(conn);
+				continue;
+			}
+			int newRow = findColumnIndex(fresh, colName);
+			if (newRow < 0) {
+				toRemove.add(conn); // 该列已被删除，连线无法保留
+			} else {
+				conn.setTargetRow(newRow);
+			}
+		}
+		for (Connection conn : toRemove) {
+			connections.remove(conn);
+			if (selectedConnection == conn) {
+				selectedConnection = null;
+			}
+		}
+		if (!toRemove.isEmpty()) {
+			linkedRowsCache = null; // 连线结构变化，失效占用行缓存
+		}
+
 		notifyBoardChanged();
 		repaint();
 		NotificationUtil.info("同步成功",
-				"已重新获取 " + tableName + "（" + fresh.getColumns().size() + " 列）");
+				"已重新获取 " + tableName + "（" + fresh.getColumns().size() + " 列）"
+						+ (toRemove.isEmpty() ? "" : "，已移除 " + toRemove.size() + " 条失效连线"));
+	}
+
+	/**
+	 * 把卡片旧表结构的「行 index → 列名」映射出来（同步表结构后重定位连线用）。
+	 */
+	private static java.util.Map<Integer, String> oldRowToColumnName(TableInfo info) {
+		java.util.Map<Integer, String> map = new java.util.HashMap<>();
+		if (info == null || info.getColumns() == null) {
+			return map;
+		}
+		List<com.wd.db.ColumnInfo> cols = info.getColumns();
+		for (int i = 0; i < cols.size(); i++) {
+			String name = cols.get(i).getName();
+			if (name != null) {
+				map.put(i, name);
+			}
+		}
+		return map;
+	}
+
+	/**
+	 * 在表结构中按列名查找列 index；找不到返回 -1。
+	 */
+	private static int findColumnIndex(TableInfo info, String colName) {
+		if (info == null || colName == null || info.getColumns() == null) {
+			return -1;
+		}
+		List<com.wd.db.ColumnInfo> cols = info.getColumns();
+		for (int i = 0; i < cols.size(); i++) {
+			if (colName.equals(cols.get(i).getName())) {
+				return i;
+			}
+		}
+		return -1;
 	}
 
 	/**

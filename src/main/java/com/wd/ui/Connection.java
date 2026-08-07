@@ -24,9 +24,9 @@ public class Connection {
 	private static final double LEAD_MAX = 60.0;
 
 	private final KanbanCard source;
-	private final int sourceRow;
+	private int sourceRow;
 	private final KanbanCard target;
-	private final int targetRow;
+	private int targetRow;
 	private Color color;
 	private float strokeWidth = DEFAULT_STROKE_WIDTH;
 
@@ -55,12 +55,26 @@ public class Connection {
 		return sourceRow;
 	}
 
+	/**
+	 * 重定位源行（2026-08-07 同步表结构后按列名重新定位连线时使用）。
+	 */
+	public void setSourceRow(int sourceRow) {
+		this.sourceRow = sourceRow;
+	}
+
 	public KanbanCard getTarget() {
 		return target;
 	}
 
 	public int getTargetRow() {
 		return targetRow;
+	}
+
+	/**
+	 * 重定位目标行（2026-08-07 同步表结构后按列名重新定位连线时使用）。
+	 */
+	public void setTargetRow(int targetRow) {
+		this.targetRow = targetRow;
 	}
 
 	public Color getColor() {

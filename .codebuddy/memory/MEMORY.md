@@ -30,3 +30,12 @@
 
 ### 6. 文件扩展名统一常量（DEVELOPMENT_GUIDE 第 9 条）
 - `DataToolsFileType.EXTENSION = "datachart"`，不要硬编码
+
+## 审查结论（2026-08-07 全项目）
+### Connection.sourceRow/targetRow 可重定位
+- 已从 `final` 放开为可变，新增 `setSourceRow/setTargetRow`
+- 用途：`syncTableStructure` 同步表结构后用列名重新定位连线行，防止列 index 错位
+- 教训：**所有引用"列 index"的地方在表结构变化后都要用列名重定位**
+
+### 已知待确认项（未修）
+- `DataChartEditor.dispose()` 关闭时 `if (modified) saveDocument()` 强制落盘，可能绕过 IDE 未保存确认
