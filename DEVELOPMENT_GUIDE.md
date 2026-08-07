@@ -675,3 +675,27 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - **所有引用列 index 的地方，在表结构变化后都要用列名重定位**（持久化 13 节 + 运行态 36 节两条路径都已覆盖）
 - 列被删除的连线直接丢弃（列都不存在了，连线语义失效），不要静默保留指向错误列
 
+### 37. 重新打开 .datachart 视口位置错位（2026-08-07）
+#### 现象
+IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"都跑到画板顶部/角落去了"，用户必须点 Focus 按钮才能恢复。
+
+#### 根因
+- `DataChartEditor.ensureInitialized` 在 `getComponent` 同步链路中触发 `loadFromFile → dataView.loadFromJson`
+- `loadFromJson` 用 `SwingUtilities.invokeLater` 延迟一帧后调 `focusView`，但此时**面板还没真正嵌入 IDE 编辑区**，Swing 布局 pass 还没完成
+- `KanbanBoard.getVisibleRect()` 返回 width=0/height=0
+- `BoardViewport.focusOn` 进入"情况 A"分支（`fits = true` 因为 `viewWidth=0`），把内容中心对齐到 (0, 0) → `transform.translate` 把视口推到负方向
+- 等 panel 真正显示时，画面跑到顶/左外
+
+#### 修复
+- **`KanbanBoard.focusView`** 在 `viewWidth <= 0 || viewHeight <= 0` 时直接 return（防御性护栏，所有路径都受益）
+- **`DataChartView.loadFromJson`** 改用 `ComponentAdapter` 监听 kanbanBoard 首次 `componentResized` 拿到有效尺寸后再 `focusView`，触发后立即注销
+- 新增 `scheduleFocusWhenReady()` 方法 + `focusWhenReadyListener` 字段
+  - 已有有效尺寸 → 直接 focus
+  - 否则注册 listener（多次 loadFromJson 时先移除旧 listener 避免累积）
+  - `dispose()` 中也清理 listener，避免内存泄漏
+
+#### 设计原则
+- **不要用 `invokeLater` 一帧延迟代替"等组件布局完成"**：在 `getComponent`/`ensureInitialized` 同步链路中调用的代码，一帧延迟后 panel 仍未真正布局完成
+- **focusOn 的入参 viewWidth/viewHeight 必须有非零校验**：否则会把内容中心对齐到 (0, 0) 产生灾难性偏移
+- **监听器注册后必须管理生命周期**：跨多次 `loadFromJson` 累积、dispose 时清理，是 Swing 组件的标准做法
+

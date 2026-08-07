@@ -39,3 +39,14 @@
 
 ### 已知待确认项（未修）
 - `DataChartEditor.dispose()` 关闭时 `if (modified) saveDocument()` 强制落盘，可能绕过 IDE 未保存确认
+
+### 7. 视口状态不在 JSON 中持久化（2026-08-07 已知）
+- 每次打开 .datachart 都重置 viewport，依赖 `focusView` 把卡片居中
+- IDE 重启自动重开时 `getComponent` 同步链路触发 `loadFromJson`，panel 还没真正完成布局
+- 修复见 DEVELOPMENT_GUIDE 第 37 节 / memory/2026-08-07.md
+- 教训：**`invokeLater` 不等于"等组件布局完成"**；**focusOn 类算法必须 viewWidth 零值校验**
+
+### 8. 关键设计陷阱：同步链路调 Swing 方法
+- `FileEditor.getComponent` 同步链路 → `ensureInitialized` → `loadFromJson` → `focusView` 都同步执行
+- 但 IDE 此时还没把 panel 加入可见容器，`getVisibleRect()` 返回 0
+- 所有依赖 `getVisibleRect`/`getSize` 的方法必须有零值防御或异步等待布局完成

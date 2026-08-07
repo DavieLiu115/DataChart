@@ -8,6 +8,8 @@ import com.wd.icon.PluginIcons;
 import com.wd.model.ChartData;
 import com.alibaba.fastjson.JSON;
 import java.awt.BorderLayout;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.File;
@@ -372,12 +374,13 @@ public class DataChartView extends DialogWrapper {
 			}
 			updateSearchStatusLabel();
 			// 打开文件后自动聚焦所有卡片（等价于点击 Focus 按钮），
-			// 延迟到组件布局完成后再执行，保证视口尺寸正确
-			javax.swing.SwingUtilities.invokeLater(() -> {
-				if (kanbanBoard != null) {
-					kanbanBoard.focusView();
-				}
-			});
+			// 2026-08-07 修复：原用 SwingUtilities.invokeLater 一帧延迟，但 IDE 重启自动重开
+			// 上次文件时，DataChartEditor.getComponent → ensureInitialized → loadFromFile 同步链路
+			// 在 panel 还没嵌入 IDE 编辑区时就调用 loadFromJson，下一帧 panel 仍未真正完成
+			// Swing 布局（doLayout/validateTree），getVisibleRect() 仍是 0/旧值 → focusOn
+			// 把内容中心对齐到 (0,0) → 视口被推到负方向，画面跑到顶/左外。
+			// 改为注册 ComponentListener 等待 panel 第一次有有效尺寸后再 focus，触发后立即注销。
+			scheduleFocusWhenReady();
 		} catch (Exception e) {
 			// 解析失败：提示用户，避免静默丢数据（保留空看板）
 			com.intellij.openapi.diagnostic.Logger.getInstance(DataChartView.class)
@@ -385,6 +388,48 @@ public class DataChartView extends DialogWrapper {
 			NotificationUtil.error("打开文件失败",
 					"无法解析该 .datachart 文件，已显示空看板。\n" + e.getMessage());
 		}
+	}
+
+	/**
+	 * 2026-08-07 新增：等待看板首次有有效尺寸后再调用 focusView。
+	 * <p>IDE 重启自动重开 .datachart 时，panel 嵌入 IDE 编辑区前 loadFromJson 已被
+	 * 同步链路触发，下一帧 Swing 布局仍未完成，getVisibleRect=0/旧值。
+	 * 用 ComponentListener 监听首次 componentResized 拿到有效尺寸后 focus，触发后立即注销。</p>
+	 */
+	private java.awt.event.ComponentListener focusWhenReadyListener;
+
+	private void scheduleFocusWhenReady() {
+		if (kanbanBoard == null) {
+			return;
+		}
+		// 如果当前已经布局完成（已显示过），直接 focus
+		if (kanbanBoard.getWidth() > 0 && kanbanBoard.getHeight() > 0) {
+			kanbanBoard.focusView();
+			return;
+		}
+		// 移除旧监听器（多次 loadFromJson 时避免累积）
+		if (focusWhenReadyListener != null) {
+			kanbanBoard.removeComponentListener(focusWhenReadyListener);
+		}
+		// 否则注册监听器，首次有效布局后调用 focus
+		focusWhenReadyListener = new ComponentAdapter() {
+			@Override
+			public void componentResized(ComponentEvent e) {
+				if (kanbanBoard.getWidth() > 0 && kanbanBoard.getHeight() > 0) {
+					// 拿到有效尺寸后再延一帧，确保 Swing 完成当前布局 pass
+					javax.swing.SwingUtilities.invokeLater(() -> {
+						if (kanbanBoard != null) {
+							kanbanBoard.focusView();
+						}
+					});
+					if (focusWhenReadyListener != null) {
+						kanbanBoard.removeComponentListener(focusWhenReadyListener);
+						focusWhenReadyListener = null;
+					}
+				}
+			}
+		};
+		kanbanBoard.addComponentListener(focusWhenReadyListener);
 	}
 
 	/**
@@ -538,6 +583,12 @@ public class DataChartView extends DialogWrapper {
 
 	@Override
 	public void dispose() {
+		// 2026-08-07 修复：清理挂在 kanbanBoard 上的"等待布局完成后 focus"监听器，
+		// 避免 listener 隐式引用 DataChartView 导致泄漏
+		if (kanbanBoard != null && focusWhenReadyListener != null) {
+			kanbanBoard.removeComponentListener(focusWhenReadyListener);
+			focusWhenReadyListener = null;
+		}
 		if (kanbanBoard != null) {
 			kanbanBoard.dispose();
 		}

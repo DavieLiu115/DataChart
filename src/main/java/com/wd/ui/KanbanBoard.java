@@ -922,6 +922,12 @@ public class KanbanBoard extends JPanel {
 	 */
 	public void focusView() {
 		Rectangle view = getVisibleRect();
+		// 2026-08-07 修复：刚加载文件时面板可能还没布局完成，viewWidth/viewHeight=0
+		// 此时 focusOn 会把内容当作"放得下"按情况 A 居中，但 viewCenter=(0,0) → 视口被推到
+		// 负方向，画面跑到顶/左外。viewWidth==0 直接跳过，等组件首次布局完成后再 focus。
+		if (view.getWidth() <= 0 || view.getHeight() <= 0) {
+			return;
+		}
 		if (viewport.focusOn(cards, (int) view.getWidth(), (int) view.getHeight())) {
 			notifyViewChanged();
 			repaint();
