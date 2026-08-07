@@ -85,7 +85,7 @@ public class DataChartView extends DialogWrapper {
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
 		focusButton.setIcon(PluginIcons.autoLayout);
 		focusButton.setText("Focus");
-		oneOneButton.setIcon(PluginIcons.oneOne);
+		oneOneButton.setText("100%");
 		donateButton.setIcon(PluginIcons.Donation);
 		donateButton.setRolloverIcon(PluginIcons.Donation_Enter);
 		donateButton.setContentAreaFilled(false);
@@ -113,12 +113,11 @@ public class DataChartView extends DialogWrapper {
 	//	fullScreamButton.addActionListener(e -> toggleFullScreen());
 	//}
 	if (oneOneButton != null) {
-		oneOneButton.setToolTipText("缩放为 1:1，并聚焦到最左/最上卡片");
+		oneOneButton.setToolTipText("缩放到 100%（保持当前画板位置不动）");
 		oneOneButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
-				// 先调整缩放比为 1:1，再 focus 调整位置（最左/最上卡片对齐显示）
+				// 只重置缩放为 100%，不移动位置（职责与 Focus 正交）
 				kanbanBoard.setZoomTo1();
-				kanbanBoard.focusView();
 			}
 		});
 	}
