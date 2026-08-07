@@ -1290,6 +1290,12 @@ public class KanbanBoard extends JPanel {
 				+ " (fixedWidth)"
 				+ ", 缩放=" + viewport.getZoomFactor());
 
+		// 2026-08-07 修复：拖入重复表时（如两张 sys_user），TableInfo 默认 id 是
+		// schema.table 拼接（"public.sys_user"），两张卡片 id 完全相同，重新打开后
+		// 按 id 找卡只能找到第一张，所有指向该 id 的连线都打到第一张上 → 线乱了
+		// 这里用 UUID 覆盖 id 保证画板上的每张卡 id 全局唯一
+		info.setId(java.util.UUID.randomUUID().toString());
+
 		KanbanCard card = KanbanCard.forTable(info.getId(), info,
 				x, y, cardWidth, height);
 		cards.add(card);
@@ -1525,6 +1531,19 @@ public class KanbanBoard extends JPanel {
 			double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
 			height = Math.min(height, 400);
 
+			// 2026-08-07 兼容旧 .datachart 文件：旧文件里 id 是 schema.table 拼接，
+			// 同一张表拖入两次时 id 完全相同，加载后连线全部指向 cards 列表里第一张
+			// 这里在 cards 列表里查重，发现 id 已存在就给当前 model 补一个 UUID，
+			// 保证画板上的每张卡 id 全局唯一，连线 id 指向精确
+			String modelId = model.getId();
+			if (modelId == null || isCardIdExists(modelId)) {
+				String newId = java.util.UUID.randomUUID().toString();
+				LOG.info("[看板] 加载时检测到重复/缺失 id (" + modelId
+						+ ")，给表 " + info.getName() + " 补 UUID=" + newId);
+				info.setId(newId);
+				model.setId(newId);
+			}
+
 			// 保留 model 的 x, y（用户拖动过的位置）
 			KanbanCard card = KanbanCard.forTable(info.getId(), info,
 					model.getX(), model.getY(), TABLE_CARD_WIDTH, height);
@@ -1562,6 +1581,21 @@ public class KanbanBoard extends JPanel {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * 检查 cards 列表中是否已存在指定 id（2026-08-07 兼容旧 .datachart 重复 id 用）。
+	 */
+	private boolean isCardIdExists(String id) {
+		if (id == null) {
+			return false;
+		}
+		for (KanbanCard c : cards) {
+			if (id.equals(c.getId())) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	// ====================== 关联列高亮（需求 2） ======================

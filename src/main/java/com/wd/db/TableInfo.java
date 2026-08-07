@@ -13,7 +13,7 @@ import java.util.List;
  */
 public class TableInfo {
 
-	private final String id;
+	private String id;
 	private final String name;
 	private final String schema;
 	private final String datasourceName;
@@ -32,6 +32,13 @@ public class TableInfo {
 
 	public String getId() {
 		return id;
+	}
+
+	/**
+	 * 覆盖卡片 ID（2026-08-07 起用于拖入重复表时分配 UUID，避免 schema.table 形式 id 重复）
+	 */
+	public void setId(String id) {
+		this.id = id;
 	}
 
 	public String getName() {

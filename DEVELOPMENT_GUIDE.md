@@ -633,3 +633,27 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - 第 33 节修复（清源行用户选中）依然必要，但**清掉的应该是"激活高亮"而不是"连线本身的颜色"**——连线仍应保留 palette 区分
 - **预览色由粉色改为深灰（2026-08-04 用户反馈）**：`CONNECTION_PREVIEW_COLOR` 改为 `JBColor(浅色 #757575, 深色 #AAAAAA)`，预览连线绘制处（原 `Color.PINK`）也统一用它。避免粉色与 palette 中的粉紫/粉红系颜色混淆
 
+### 35. 卡片 ID 用 UUID，兼容旧 schema.table id（2026-08-07）
+#### 问题
+用户拖入两张相同的表（如 `sys_user`），连线时一切正常，但**关闭重新打开后连线全乱**——因为：
+- `DatabaseTableMetadataFetcher` 默认把卡片 id 设为 `schema + "." + tableName`（如 `public.sys_user`）
+- 两张 `sys_user` 的 id 完全相同
+- `BoardPersistence.loadFromChartData` 用 `findCardById` 按 id 查卡时，cards 列表里第一张 `public.sys_user` 先匹配上，所有指向 `public.sys_user` 的连线都打到第一张卡上
+- 视觉表现：原本从下方新加的 `sys_user.user_id` 连到 `sys_user_social.user_id` 的线，重新打开后变成从**第一张** `sys_user.user_id` 连出去 → 线错乱
+
+#### 修复
+- **`TableInfo.id`** 从 `final` 改为可写，新增 `setId(String)` 方法（拖入时分配 UUID 覆盖默认 id）
+- **`KanbanBoard.addTableCard`**：在 `KanbanCard.forTable` 之前 `info.setId(UUID.randomUUID().toString())`，保证画板上的每张卡 id 全局唯一
+- **`KanbanBoard.loadFromChartData`**：遍历 `data.getTables()` 时检测重复 id（`isCardIdExists` 私有辅助方法），发现重复或为 null 就给 model 补 UUID，并同步 `model.setId(newId)` 让持久化时也写入新 id
+- **新文件 vs 旧文件**：
+  - 新文件：id 是 UUID，唯一性天然满足，无重复
+  - 旧文件加载：cards 列表顺序扫描，第一张 `public.sys_user` 保持原 id，后续重复的补 UUID；第一次保存后 id 全部唯一，问题根治
+  - 旧文件里**已经丢失了**的连线（id 重复时本来就没正确关联）无法挽救，但用户**重新保存一次**后所有 id 都规范化
+- **未改动**：`Connection` / `ChartRelation` / `BoardPersistence.findCardById` 逻辑完全不动——`ChartRelation.fromCardId` 存的就是卡片 id，本身就是 string 类型，向后兼容
+
+#### 设计原则
+- **数据标识用 UUID 而非业务字段**：`schema.table` 不适合做 id（用户可能拖同一张表两次；同 schema 下不同库的同名表会冲突）
+- **拖入时分配，不靠加载时补救**：从源头避免 id 冲突
+- **加载时检测 + 补 UUID**：保证旧文件首次打开也不会让用户重画所有连线
+- **持久化 in-memory model**：补 UUID 后立即 `model.setId(newId)`，下次保存就把规范化结果写回 JSON，**用户感知到的恢复是「保存一次就好」**
+
