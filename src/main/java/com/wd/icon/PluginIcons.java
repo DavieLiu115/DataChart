@@ -37,9 +37,11 @@ public class PluginIcons {
     public static final Icon Donation = load("/icons/donation.svg");
     public static final Icon Donation_Enter = load("/icons/donation_enter.svg");
 
-    public static final Icon oneOne = load("/icons/oneOne.svg");
     public static final Icon fitContent = load("/icons/fitContent.svg");
     public static final Icon fitContent_dark = load("/icons/fitContent_dark.svg");
+
+    public static final Icon actualZoom = load("/icons/actualZoom.svg");
+    public static final Icon actualZoom_dark = load("/icons/actualZoom_dark.svg");
 
     public static Icon load(String iconPath) {
         return IconLoader.getIcon(iconPath, PluginIcons.class);

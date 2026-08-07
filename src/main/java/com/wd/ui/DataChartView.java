@@ -86,8 +86,10 @@ public class DataChartView extends DialogWrapper {
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
 		focusButton.setIcon(PluginIcons.autoLayout);
 		focusButton.setText("Recenter");
+		oneOneButton.setIcon(PluginIcons.actualZoom);
 		oneOneButton.setText("100%");
 		fitButton.setIcon(PluginIcons.fitContent);
+		fitButton.setText("Fit");
 		donateButton.setIcon(PluginIcons.Donation);
 		donateButton.setRolloverIcon(PluginIcons.Donation_Enter);
 		donateButton.setContentAreaFilled(false);
