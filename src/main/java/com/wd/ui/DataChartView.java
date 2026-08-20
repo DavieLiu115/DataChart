@@ -19,6 +19,7 @@ import javax.swing.Action;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JFileChooser;
+import javax.swing.KeyStroke;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.border.MatteBorder;
@@ -79,6 +80,7 @@ public class DataChartView extends DialogWrapper {
 		setupSearchField();
 		initKanbanBoard();
 		setupToolBarButtons();
+		setupFindShortcut();
 
 		//fullScreamButton.setIcon(PluginIcons.fullScream);
 		exportPDFButton.setIcon(PluginIcons.export);
@@ -148,6 +150,35 @@ public class DataChartView extends DialogWrapper {
 			});
 		}
 
+	}
+
+	/**
+	 * 2026-08-20 新增：注册 Cmd+F (Mac) / Ctrl+F (Win/Linux) 全局快捷键，
+	 * 触发时把焦点跳到搜索框，并全选现有内容方便覆盖输入。
+	 *
+	 * <p>用 {@link JComponent#registerKeyboardAction} 绑定到 kanbanBoard，
+	 * 即便焦点不在搜索框也能触发（画板无文本输入焦点，KeyAdapter 监听不到）。</p>
+	 */
+	private void setupFindShortcut() {
+		if (kanbanBoard == null || searchTextField == null) {
+			return;
+		}
+		int modifiers = java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+		KeyStroke findStroke = KeyStroke.getKeyStroke(KeyEvent.VK_F, modifiers);
+		kanbanBoard.registerKeyboardAction(e -> focusSearchField(),
+				"FocusSearchField", findStroke, JComponent.WHEN_IN_FOCUSED_WINDOW);
+	}
+
+	/**
+	 * 把焦点跳到搜索框，并全选现有内容（方便覆盖输入）。
+	 */
+	private void focusSearchField() {
+		if (searchTextField == null) {
+			return;
+		}
+		javax.swing.JTextField editor = searchTextField.getTextEditor();
+		editor.requestFocusInWindow();
+		editor.selectAll();
 	}
 
 	/**
