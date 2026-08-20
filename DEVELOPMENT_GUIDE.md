@@ -750,17 +750,24 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 `KanbanBoard.addTableCard` / `loadFromChartData` 中 `height = Math.min(height, 400)` 硬编码 400px 上限，
 `KanbanCard.updateTableInfo` 同样 `Math.min(400.0, ...)`，导致 `(400-60)/18 ≈ 18.8` 行装不下全部列。
 #### 修复
+**第一轮（2026-08-20）：去掉 400 上限**
 三处 `Math.min(height, 400)` / `Math.min(400.0, ...)` 全部去掉 400 限制：
-- 第一轮（2026-08-20）：改为 `Math.max(height, 400)`（保底最小高度 400）
-- 第二轮（2026-08-20，用户要求）：保底也去掉，**高度完全由列数决定，不设上下限**
-  - `KanbanBoard.addTableCard`：`height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT`（列数至少 3）
-  - `KanbanBoard.loadFromChartData`：同上
-  - `KanbanCard.updateTableInfo`：`h = Math.max(50.0, headerHeight + bodyH + padding)`（保留 50 仅防空表塌陷，正常表高度 = header + 列数×18）
+- `KanbanBoard.addTableCard`：`height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT`
+- `KanbanBoard.loadFromChartData`：同上
+- `KanbanCard.updateTableInfo`：`h = Math.max(50.0, headerHeight + bodyH + padding)`（保留 50 仅防空表塌陷）
 渲染端 `drawTableCard` 的 `maxRows` 是动态按 bounds 高度算的，无需改动。
+
+**第二轮（2026-08-20）：高度公式三处统一 → 修底部 22px 空白**
+去上限后发现底部仍有 ~22px 宽空白行——因为 `KanbanBoard.TABLE_CARD_BASE_HEIGHT = 60` 是历史遗留值，
+与 `KanbanCard.drawTableCard` 实际用到的 `headerHeight(28) + padding(10) = 38` 不一致。
+- `KanbanCard` 新增 `public static final int HEADER_HEIGHT = 28` / `PADDING = 10`，原实例字段保留指向常量（不破坏 14 处引用）
+- `KanbanBoard.TABLE_CARD_BASE_HEIGHT` 改为 `KanbanCard.HEADER_HEIGHT + KanbanCard.PADDING`（=38），让画板计算高度 = 渲染实际可用高度
+- `KanbanCard.updateTableInfo` 改用静态常量 `HEADER_HEIGHT / ROW_HEIGHT / PADDING`，公式与 `KanbanBoard` 完全同步
 #### 副作用（预期内）
 - 列多的卡（如 80 列）会变 ~1500px 高，可能遮挡/影响排布
 - 导出 PDF/图片时包围盒自动包含整卡，图幅会变大
 #### 设计原则
-- **高度计算必须三处同步**：`addTableCard`（新建）、`loadFromChartData`（加载）、`updateTableInfo`（同步表结构），漏改任意一处会导致同一张表在不同路径下高度不一致
+- **高度计算必须三处同步 + 公式常量共享**：`addTableCard`（新建）、`loadFromChartData`（加载）、`updateTableInfo`（同步表结构）必须共用同一组静态常量（`HEADER_HEIGHT`/`ROW_HEIGHT`/`PADDING`），不能各自算各自的
+- **BASE_HEIGHT 与 drawTableCard 公式必须严格对齐**：否则底部会留多余空白（38 ≠ 60 是隐藏陷阱）
 - 若后续要控制遮挡，建议在"卡片内滚动"或"折叠双栏"方案上做，不要回到全局 400 截断
 

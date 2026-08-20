@@ -184,8 +184,14 @@ public class KanbanBoard extends JPanel {
 
 	/** 表格卡片尺寸（列多，需要更高） */
 	private static final double TABLE_CARD_WIDTH = 280;
-	private static final double TABLE_CARD_ROW_HEIGHT = 18;
-	private static final double TABLE_CARD_BASE_HEIGHT = 60;
+	private static final double TABLE_CARD_ROW_HEIGHT = KanbanCard.ROW_HEIGHT;
+	/**
+	 * 卡片高度 = header + 行数×rowHeight + 上下边距
+	 * （2026-08-20：去掉 400 上限的同时，把 BASE 改成由 KanbanCard 常量派生，
+	 * 与 drawTableCard 实际渲染公式保持完全一致，消除底部 ~22px 多余空白）
+	 */
+	private static final double TABLE_CARD_BASE_HEIGHT =
+			KanbanCard.HEADER_HEIGHT + KanbanCard.PADDING; // 28 + 10 = 38
 
 	/** 背景色（适配深色 / 浅色主题） */
 	private final Color backgroundColor = new JBColor(Gray._240, new Color(61, 63, 65));

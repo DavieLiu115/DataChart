@@ -61,8 +61,12 @@ public class KanbanCard {
 	private final java.util.Map<Integer, java.awt.Color> connectionHighlightRows = new java.util.HashMap<>();
 
 	// 样式
-	private int headerHeight = 28;
-	private int padding = 10;
+	/** header 区域高度（与 drawTableCard 的 bodyTop 计算保持一致，供外部计算卡片总高度） */
+	public static final int HEADER_HEIGHT = 28;
+	/** 卡片内边距（与 drawTableCard 的 maxBodyY 计算保持一致） */
+	public static final int PADDING = 10;
+	private int headerHeight = HEADER_HEIGHT;
+	private int padding = PADDING;
 	/** 表格卡片每行高度（与 drawTableCard 内部 rowHeight 保持一致，供外部精确滚动使用） */
 	public static final int ROW_HEIGHT = 18;
 	private Font headerFont = new Font(Font.SANS_SERIF, Font.BOLD, 13);
@@ -355,11 +359,11 @@ public class KanbanCard {
 		this.description = newInfo.getComment();
 
 		// 重新计算高度（包含新增列和保留展示的已删除列）
-		// 2026-08-20 高度完全由列数决定，不设 400 上限（与 KanbanBoard 高度计算保持一致）
+		// 2026-08-20 与 KanbanBoard.TABLE_CARD_BASE_HEIGHT 用同一套静态常量，
+		// 画板计算高度 == drawTableCard 实际可用高度，底部不再有多余空白
 		int totalColCount = (newInfo.getColumns() == null ? 0 : newInfo.getColumns().size()) + deletedColumns.size();
-		double rowH = ROW_HEIGHT;
-		double bodyH = totalColCount * rowH;
-		double h = Math.max(50.0, headerHeight + bodyH + padding);
+		double bodyH = totalColCount * ROW_HEIGHT;
+		double h = Math.max(50.0, HEADER_HEIGHT + bodyH + PADDING);
 		bounds.setRect(bounds.getX(), bounds.getY(), bounds.getWidth(), h);
 
 		// 如果有新增列，触发左侧划入动画
