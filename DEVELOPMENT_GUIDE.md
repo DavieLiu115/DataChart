@@ -773,24 +773,28 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 
 ### 40. 拖放表格卡片定位契约：鼠标位置 = 卡片左上角（2026-08-20）
 #### 现象
-从 Database 工具窗口把表拖入画板，表格出现位置与鼠标松手位置有明显偏差。
-#### 根因
-`KanbanBoard.addTableCard(info, dropPoint)` 原实现是"鼠标位置 = 卡片中心"：
-```java
-x = boardPoint.getX() - cardWidth / 2;
-y = boardPoint.getY() - height / 2;
-```
-对 80 列等高卡，中心对齐时卡片会以鼠标为轴心向四周扩散，用户感觉"没出现在鼠标处"。
+从 Database 工具窗口把表拖入画板，表格出现位置与鼠标松手位置有明显偏差（数百到上千像素）。
+#### 根因（两层叠加）
+**第一层 — 坐标系不一致**：
+- `DnDEvent.getPointOn(null)` 给的是 **IDE 屏幕绝对坐标**（含 IDE frame 与多屏偏移）
+- `mouseDragged` 的 `MouseEvent.getPoint()` 给的是 **JPanel 局部坐标**（panel 内 0,0）
+- 两条链路坐标系不同，原代码直接把 IDE 屏幕坐标喂给 `viewport.transformPoint`（按 component-local 设计）→ 反算出来的"画板坐标"实际是含 IDE 偏移的错位值
+**第二层 — 对齐方式**：
+原"鼠标 = 卡片中心"对超高卡片（如 21 字段 sys_menu ≈ 416px 高）用户感受是"卡片漂移"。
 #### 修复
-改为"鼠标位置 = 卡片左上角"（与 draw.io / Freeform 等主流画板习惯一致）：
+- 在 `addTableCard` 里把 IDE 屏幕坐标先减去 `KanbanBoard.getLocationOnScreen()` 转成 JPanel 局部坐标，再走 `viewport.transformPoint`：
 ```java
-x = boardPoint.getX();
+java.awt.Point panelLocationOnScreen = getLocationOnScreen();
+localPoint = new java.awt.Point(screenPoint.x - panelLocationOnScreen.x,
+                                  screenPoint.y - panelLocationOnScreen.y);
+Point2D boardPoint = viewport.transformPoint(localPoint);
+x = boardPoint.getX();  // 鼠标位置 = 卡片左上角
 y = boardPoint.getY();
 ```
-- 位置计算只此一处，其他路径（自动平铺、dragOffset 拖动）不受影响
+- 同时把契约改为"鼠标 = 卡片左上角"（draw.io / Freeform 习惯），避免超高卡让用户感觉"漂移"
 #### 设计原则
-- **画板坐标变换统一入口**：dropPoint 来自 `DnDEvent.getPointOn(null)`（屏幕坐标），必须经 `viewport.transformPoint` 反算到画板坐标后再放置
-- **拖放落点契约要明确**：中心对齐 vs 左上角对齐，二选一并在注释里写明；左上角对齐对超高卡片（几十列）体验更好
+- **坐标链路先对齐，再谈对齐方式**：IDE DnD 屏幕坐标必须先转 JPanel 局部坐标，否则 transform 反算全错
+- **拖放落点契约要明确**：中心 vs 左上角，二选一并注释写明；列多的表建议左上角
 
 ### 39. 表格卡片高度去掉 400 上限（2026-08-20）
 #### 现象

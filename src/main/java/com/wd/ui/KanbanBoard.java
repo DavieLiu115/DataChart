@@ -1385,8 +1385,23 @@ public class KanbanBoard extends JPanel {
 		double x;
 		double y;
 		if (dropPoint != null) {
-			Point2D boardPoint = viewport.transformPoint(dropPoint);
-			// 2026-08-20 拖放契约：鼠标位置 = 卡片左上角（符合 draw.io / Freeform 等画板习惯）
+			// 2026-08-20 修复：DnDEvent.getPointOn(null) 给的是 IDE 屏幕绝对坐标，
+			// 与 mouseDragged 的 MouseEvent.getPoint()（JPanel 局部坐标）坐标系不一致。
+			// 这里把屏幕坐标转成 KanbanBoard 自身局部坐标后，再走 viewport.transformPoint，
+			// 与绘制链路 (paintComponent 用 viewport.transform 正向变换) 完全一致。
+			java.awt.Point screenPoint = dropPoint;
+			java.awt.Point localPoint;
+			try {
+				java.awt.Point panelLocationOnScreen = getLocationOnScreen();
+				localPoint = new java.awt.Point(
+						screenPoint.x - panelLocationOnScreen.x,
+						screenPoint.y - panelLocationOnScreen.y);
+			} catch (Exception ex) {
+				// 极端情况（panel 还未显示）按原值兜底
+				localPoint = screenPoint;
+			}
+			Point2D boardPoint = viewport.transformPoint(localPoint);
+			// 拖放契约：鼠标位置 = 卡片左上角（符合 draw.io / Freeform 等画板习惯）
 			x = boardPoint.getX();
 			y = boardPoint.getY();
 		} else {
