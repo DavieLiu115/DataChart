@@ -504,6 +504,24 @@ public class DataChartView extends DialogWrapper {
 		searchTextField.setHistorySize(10);
 		// 回车触发搜索
 		searchTextField.getTextEditor().addActionListener(e -> doSearch());
+		// 2026-08-20 修复：清空文本（手动 Delete / 历史选空 / IDE 清空按钮）时同步清除高亮，
+		// 仅在文本变空时清搜索，避免输入过程中反复 clearSearch 影响性能
+		searchTextField.getTextEditor().getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+			@Override public void insertUpdate(javax.swing.event.DocumentEvent e) { checkClearOnEmpty(); }
+			@Override public void removeUpdate(javax.swing.event.DocumentEvent e) { checkClearOnEmpty(); }
+			@Override public void changedUpdate(javax.swing.event.DocumentEvent e) { /* plain text 不触发 */ }
+
+			private void checkClearOnEmpty() {
+				if (kanbanBoard == null || searchTextField == null) {
+					return;
+				}
+				String text = searchTextField.getText();
+				if (text == null || text.isEmpty()) {
+					kanbanBoard.clearSearch();
+					updateSearchStatusLabel();
+				}
+			}
+		});
 		// 上下方向键在搜索结果中切换
 		searchTextField.getTextEditor().addKeyListener(new KeyAdapter() {
 			@Override
