@@ -743,6 +743,34 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 - **复用现有数据结构**：BFS 状态直接用 `RelatedRowPos`，key 用 `makeRelatedKey`，与渲染路径同源，避免新旧 key 不匹配
 - **连通子图边界**：不属于该连通子图的孤立连线行不受影响（用户只关注选中的那张网络）
 
+### 41. 空白拖拽改框选 + 多选 + Command+Del 批量删除（2026-08-20）
+#### 需求
+1. 左键表头按住移动 = 移动表（原有逻辑，未动）
+2. 左键空白按住移动 = 画选区，选区内的表全部选中（多选）
+3. Command+Del 删除所有选中的表
+#### 实现
+- **字段**：`selectedCards`（`LinkedHashSet<KanbanCard>` 多选集合）、`isSelecting`、`selectionStartBoard`（画板坐标）、`selectionRect`（画板坐标）、`SELECTION_DRAG_THRESHOLD=4`
+  - `selectedCard` 保留为"主选中卡"（多选时是 Z 序最上层的一张），兼容大量单卡逻辑
+- **mousePressed 空白处**：从 `isDraggingBoard=true`（平移画板）改为 `isSelecting=true` + 记录起点 + `CROSSHAIR_CURSOR`
+  - 平移画板仍可用滚轮 pan；`isDraggingBoard` 分支保留但不再触发
+- **mouseDragged**：`isSelecting` 分支实时更新 `selectionRect`（min/max 归一化）→ `updateSelectionFromRect()`
+  - 判定规则：`selectionRect.intersects(card.bounds)`，相交即选中（部分重叠也算）
+- **mouseReleased**：`isSelecting=false`；选区宽高都 < 4 视为单击空白 → `clearSelectedCards()`
+- **paintComponent**：在画板坐标、卡片之上画选区：`fill`（composite 0.18 半透明蓝 #4A90E2）+ `draw` 边框
+  - 坑：`new Color(int, true)` 把值当 ARGB（alpha=0x00 → 完全透明），必须用 `new Color(int)` 配 composite
+- **drawCards**：`isSelected = (card == selectedCard || selectedCards.contains(card))`
+- **选中入口统一**：`selectOnly(card)`（点击卡片时清空集合 + 只选一张）；`clearSelectedCards()` 清空
+- **删除**：`deleteSelectedCard()` 改为删除 `selectedCards ∪ selectedCard`：
+  - 先统一检查是否含连线 → 弹一次确认
+  - `deleteCard(card, false)` 逐张删除（`confirmRelations=false` 避免重复弹窗）
+  - `deleteCard` 拆出带参重载，右键菜单仍走 `deleteCard(card)`（带确认）
+- **同步清理**：`removeCard` / `clearCards` / `loadFromChartData` / `deleteCard` 都要 `selectedCards.remove/clear`
+#### 设计原则
+- **单卡选中字段与多选集合并存时，所有入口必须走统一方法**（selectOnly / clearSelectedCards），禁止散落直接赋值
+- **框选矩形用画板坐标**（随 zoom/pan 跟随画布），判定相交用卡片真实 bounds
+- **批量删除的连线确认只弹一次**：确认逻辑上提到批量层，逐卡删除关闭 confirm
+- **任何清空卡片的路径都要同步清多选集合**：removeCard / clearCards / loadFromChartData / deleteCard 已全覆盖
+
 ### 40. 拖放表格卡片定位契约：鼠标位置 = 卡片左上角（2026-08-20）
 #### 现象
 从 Database 工具窗口把表拖入画板，表格出现位置与鼠标松手位置有明显偏差。

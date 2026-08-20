@@ -9,6 +9,7 @@ import com.wd.db.TableInfo;
 import com.wd.model.ChartData;
 import com.wd.model.ChartRelation;
 import com.wd.model.RelationType;
+import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -76,14 +77,29 @@ public class KanbanBoard extends JPanel {
 	/** 拖拽卡片时的偏移量（卡内坐标） */
 	private final Point2D dragOffset = new Point2D.Double();
 
-	/** 是否正在拖拽画板（空白区域按下） */
+	/** 是否正在拖拽画板（空白区域按下，2026-08-20 起空白拖拽改为框选，此字段保留兼容） */
 	private boolean isDraggingBoard = false;
 
 	/** 鼠标上一个位置（用于计算拖拽增量） */
 	private Point2D lastPoint;
 
-	/** 当前选中的卡片 */
+	/** 当前选中的卡片（主选中卡，兼容单卡逻辑；多选时是 selectedCards 中 Z 序最上层的一张） */
 	private KanbanCard selectedCard = null;
+
+	/** 多选集合（2026-08-20 框选引入：空白拖拽画选区，相交卡片全部选中） */
+	private final java.util.Set<KanbanCard> selectedCards = new java.util.LinkedHashSet<>();
+
+	/** 是否正在框选（空白区域按下拖动） */
+	private boolean isSelecting = false;
+
+	/** 框选起点（画板坐标） */
+	private Point2D selectionStartBoard = null;
+
+	/** 当前框选矩形（画板坐标，实时更新） */
+	private java.awt.geom.Rectangle2D selectionRect = null;
+
+	/** 空白拖拽升级为框选的最小拖动距离（画板坐标，避免单击空白误触发选区） */
+	private static final double SELECTION_DRAG_THRESHOLD = 4;
 
 	/** 连线列表 */
 	private final List<Connection> connections = new ArrayList<>();
@@ -324,7 +340,7 @@ public class KanbanBoard extends JPanel {
 						}
 						// header 区域允许拖拽整张卡片
 						draggedCard = card;
-						selectedCard = card;
+						selectOnly(card);
 						dragOffset.setLocation(
 								transformedPoint.getX() - card.getBounds().getX(),
 								transformedPoint.getY() - card.getBounds().getY());
@@ -370,18 +386,21 @@ public class KanbanBoard extends JPanel {
 					}
 					// 否则：拖拽卡片
 					draggedCard = card;
-					selectedCard = card;
+					selectOnly(card);
 					dragOffset.setLocation(
 							transformedPoint.getX() - card.getBounds().getX(),
 							transformedPoint.getY() - card.getBounds().getY());
 					setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
 					repaint();
 				} else {
-					// 点击空白区域：开始拖拽画板，同时清空列选中态
-					isDraggingBoard = true;
-					selectedCard = null;
+					// 点击空白区域：开始框选（2026-08-20，替代原"平移画板"；
+					// 画板平移保留滚轮 pan。拖动超过阈值才画选区，单击空白则清空选中）
+					isSelecting = true;
+					selectionStartBoard = viewport.transformPoint(e.getPoint());
+					selectionRect = new java.awt.geom.Rectangle2D.Double(
+							selectionStartBoard.getX(), selectionStartBoard.getY(), 0, 0);
 					clearActiveHighlight();
-					setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+					setCursor(Cursor.getPredefinedCursor(Cursor.CROSSHAIR_CURSOR));
 					repaint();
 				}
 			}
@@ -396,6 +415,21 @@ public class KanbanBoard extends JPanel {
 				draggedCard = null;
 				activeSnapGuideV = null;
 				activeSnapGuideH = null;
+
+				// 框选结束（2026-08-20）：几乎没拖动（单击空白）视为取消选择
+				if (isSelecting) {
+					isSelecting = false;
+					boolean tinyDrag = selectionRect == null
+							|| (selectionRect.getWidth() < SELECTION_DRAG_THRESHOLD
+									&& selectionRect.getHeight() < SELECTION_DRAG_THRESHOLD);
+					if (tinyDrag) {
+						selectedCards.clear();
+						selectedCard = null;
+					}
+					selectionStartBoard = null;
+					selectionRect = null;
+					repaint();
+				}
 
 				// 待连线但未升级（2026-08-04）：鼠标没移动过阈值就松手，
 				// 按"普通左键点击列行"处理 → 触发列高亮，保持原有交互。
@@ -521,8 +555,20 @@ public class KanbanBoard extends JPanel {
 					} catch (Exception ex) {
 						ex.printStackTrace();
 					}
+				} else if (isSelecting) {
+					// 框选（2026-08-20）：更新选区矩形（画板坐标），实时选中相交的卡片
+					Point2D curBoard = viewport.transformPoint(e.getPoint());
+					if (selectionStartBoard != null) {
+						double minX = Math.min(selectionStartBoard.getX(), curBoard.getX());
+						double minY = Math.min(selectionStartBoard.getY(), curBoard.getY());
+						double w = Math.abs(curBoard.getX() - selectionStartBoard.getX());
+						double h = Math.abs(curBoard.getY() - selectionStartBoard.getY());
+						selectionRect.setRect(minX, minY, w, h);
+						updateSelectionFromRect();
+					}
+					repaint();
 				} else if (isDraggingBoard) {
-					// 平移画板
+					// 平移画板（2026-08-20 起空白拖拽被框选占用，此分支保留兼容，不再触发）
 					double dx = e.getX() - lastPoint.getX();
 					double dy = e.getY() - lastPoint.getY();
 					viewport.pan(dx, dy);
@@ -752,12 +798,82 @@ public class KanbanBoard extends JPanel {
 	// ====================== 卡片管理 ======================
 
 	/**
-	 * 删除选中的卡片（删除前检查是否有连线，如有则弹二次确认）。
+	 * 单选一张卡片：清空多选集合，只保留该卡（2026-08-20 框选引入后统一入口）。
+	 */
+	private void selectOnly(KanbanCard card) {
+		if (card == null) {
+			return;
+		}
+		selectedCards.clear();
+		selectedCards.add(card);
+		selectedCard = card;
+	}
+
+	/**
+	 * 清空当前选中（卡片多选 + 主选中卡）。
+	 */
+	private void clearSelectedCards() {
+		selectedCards.clear();
+		selectedCard = null;
+	}
+
+	/**
+	 * 根据当前框选矩形更新多选集合（2026-08-20）。
+	 *
+	 * <p>判定规则：卡片 bounds 与选区相交即选中（部分重叠也算）。</p>
+	 */
+	private void updateSelectionFromRect() {
+		if (selectionRect == null) {
+			return;
+		}
+		selectedCards.clear();
+		KanbanCard topCard = null;
+		for (KanbanCard c : cards) {
+			if (selectionRect.intersects(c.getBounds())) {
+				selectedCards.add(c);
+				topCard = c; // 遍历到最后的即 Z 序最上层
+			}
+		}
+		selectedCard = topCard;
+	}
+
+	/**
+	 * 删除所有选中的卡片（Command+Del）。
+	 *
+	 * <p>2026-08-20 支持多选：先统一检查是否含连线并弹一次确认，再逐个删除。</p>
 	 */
 	private void deleteSelectedCard() {
+		java.util.Set<KanbanCard> toDelete = new java.util.LinkedHashSet<>(selectedCards);
 		if (selectedCard != null) {
-			deleteCard(selectedCard);
+			toDelete.add(selectedCard);
 		}
+		if (toDelete.isEmpty()) {
+			return;
+		}
+
+		boolean hasRelations = false;
+		for (KanbanCard c : toDelete) {
+			if (hasRelationsFor(c.getId())) {
+				hasRelations = true;
+				break;
+			}
+		}
+		if (hasRelations) {
+			boolean confirmed = NotificationUtil.confirmYesNo(project,
+					"删除数据库表",
+					"选中的 " + toDelete.size() + " 张表中存在与其他表的连线，删除后连线关系将一并移除。\n\n确定要删除吗？",
+					com.intellij.openapi.ui.Messages.getYesButton(),
+					com.intellij.openapi.ui.Messages.getNoButton());
+			if (!confirmed) {
+				return;
+			}
+		}
+
+		for (KanbanCard c : toDelete) {
+			deleteCard(c, false); // 外层已统一确认连线，不再逐卡弹窗
+		}
+		clearSelectedCards();
+		repaint();
 	}
 
 	/**
@@ -766,12 +882,20 @@ public class KanbanBoard extends JPanel {
 	 * <p>效果等同 Command+Del：有连线先提示，无连线直接删除。</p>
 	 */
 	private void deleteCard(KanbanCard card) {
+		deleteCard(card, true);
+	}
+
+	/**
+	 * 删除指定卡片。
+	 *
+	 * @param confirmRelations 是否弹连线二次确认；多选删除时外层已统一确认过，传 false 避免重复弹窗
+	 */
+	private void deleteCard(KanbanCard card, boolean confirmRelations) {
 		if (card == null) {
 			return;
 		}
 
-		boolean hasRelations = hasRelationsFor(card.getId());
-		if (hasRelations) {
+		if (confirmRelations && hasRelationsFor(card.getId())) {
 			boolean confirmed = NotificationUtil.confirmYesNo(project,
 					"删除数据库表",
 					"表 \"" + card.getName() + "\" 存在与其他表的连线，删除后连线关系将一并移除。\n\n确定要删除吗？",
@@ -788,6 +912,7 @@ public class KanbanBoard extends JPanel {
 		if (selectedCard == card) {
 			selectedCard = null;
 		}
+		selectedCards.remove(card);
 		if (activeHighlightCard == card) {
 			clearActiveHighlight();
 		}
@@ -877,6 +1002,7 @@ public class KanbanBoard extends JPanel {
 			if (selectedCard == card) {
 				selectedCard = null;
 			}
+			selectedCards.remove(card);
 			repaint();
 		}
 		return result;
@@ -888,6 +1014,7 @@ public class KanbanBoard extends JPanel {
 	public void clearCards() {
 		cards.clear();
 		selectedCard = null;
+		selectedCards.clear();
 		repaint();
 	}
 
@@ -1049,7 +1176,7 @@ public class KanbanBoard extends JPanel {
 			}
 		}
 		for (KanbanCard card : cards) {
-			boolean isSelected = (card == selectedCard);
+			boolean isSelected = (card == selectedCard || selectedCards.contains(card));
 			card.setSelected(isSelected);
 			Map<Integer, Color> merged = new HashMap<>(
 					linkedRowsCache.getOrDefault(card, Collections.emptyMap()));
@@ -1122,6 +1249,18 @@ public class KanbanBoard extends JPanel {
 
 		// 3. 绘制所有卡片
 		drawCards(g2d, isDarkTheme());
+
+		// 3.5 绘制框选矩形（2026-08-20：空白拖拽选区，画板坐标，画在卡片上方）
+		if (isSelecting && selectionRect != null) {
+			// 注意：new Color(0x4A90E2) 是 RGB 解析（alpha=255），配合 composite 产生半透明填充
+			g2d.setColor(new Color(0x4A90E2));
+			g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.18f));
+			g2d.fill(selectionRect);
+			g2d.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 1.0f));
+			g2d.setColor(new Color(0x4A90E2));
+			g2d.setStroke(new BasicStroke(1f));
+			g2d.draw(selectionRect);
+		}
 
 		// 4. 绘制连线预览（鼠标跟随）
 		if (isConnecting && connectionSource != null && connectionCurrentPoint != null) {
@@ -1685,6 +1824,7 @@ public class KanbanBoard extends JPanel {
 				this::findCardById, this::addConnection);
 
 		selectedCard = null;
+		selectedCards.clear();
 		repaint();
 	}
 
