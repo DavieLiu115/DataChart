@@ -50,3 +50,9 @@
 - `FileEditor.getComponent` 同步链路 → `ensureInitialized` → `loadFromJson` → `focusView` 都同步执行
 - 但 IDE 此时还没把 panel 加入可见容器，`getVisibleRect()` 返回 0
 - 所有依赖 `getVisibleRect`/`getSize` 的方法必须有零值防御或异步等待布局完成
+
+### 9. 卡片高度公式三处必须共享静态常量（2026-08-20）
+- 三处计算位置：`KanbanBoard.addTableCard`（新建）+ `KanbanBoard.loadFromChartData`（加载）+ `KanbanCard.updateTableInfo`（同步表结构）
+- 必须共用 `KanbanCard.HEADER_HEIGHT(28)` / `ROW_HEIGHT(18)` / `PADDING(10)` 这套静态常量，算出 `height = HEADER_HEIGHT + 列数×ROW_HEIGHT + PADDING`
+- 教训：`KanbanBoard.TABLE_CARD_BASE_HEIGHT` 历史上写死成 60（= 28+10+22 多余空白），与 `drawTableCard` 实际公式 38 不对齐，导致 20 列的表底部留 ~22px 空白行
+- 详见 DEVELOPMENT_GUIDE 第 39 节 / memory/2026-08-20.md

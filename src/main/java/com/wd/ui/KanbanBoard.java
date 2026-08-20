@@ -1247,8 +1247,9 @@ public class KanbanBoard extends JPanel {
 		double y;
 		if (dropPoint != null) {
 			Point2D boardPoint = viewport.transformPoint(dropPoint);
-			x = boardPoint.getX() - cardWidth / 2;
-			y = boardPoint.getY() - height / 2;
+			// 2026-08-20 拖放契约：鼠标位置 = 卡片左上角（符合 draw.io / Freeform 等画板习惯）
+			x = boardPoint.getX();
+			y = boardPoint.getY();
 		} else {
 			// 2026-08-01 修复"导出图片左边留白太多"：
 			// 旧逻辑调 addCard(card) 会把 table card 的位置/尺寸覆盖为 (50, 50, 200, 130)

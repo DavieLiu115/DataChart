@@ -743,6 +743,27 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 - **复用现有数据结构**：BFS 状态直接用 `RelatedRowPos`，key 用 `makeRelatedKey`，与渲染路径同源，避免新旧 key 不匹配
 - **连通子图边界**：不属于该连通子图的孤立连线行不受影响（用户只关注选中的那张网络）
 
+### 40. 拖放表格卡片定位契约：鼠标位置 = 卡片左上角（2026-08-20）
+#### 现象
+从 Database 工具窗口把表拖入画板，表格出现位置与鼠标松手位置有明显偏差。
+#### 根因
+`KanbanBoard.addTableCard(info, dropPoint)` 原实现是"鼠标位置 = 卡片中心"：
+```java
+x = boardPoint.getX() - cardWidth / 2;
+y = boardPoint.getY() - height / 2;
+```
+对 80 列等高卡，中心对齐时卡片会以鼠标为轴心向四周扩散，用户感觉"没出现在鼠标处"。
+#### 修复
+改为"鼠标位置 = 卡片左上角"（与 draw.io / Freeform 等主流画板习惯一致）：
+```java
+x = boardPoint.getX();
+y = boardPoint.getY();
+```
+- 位置计算只此一处，其他路径（自动平铺、dragOffset 拖动）不受影响
+#### 设计原则
+- **画板坐标变换统一入口**：dropPoint 来自 `DnDEvent.getPointOn(null)`（屏幕坐标），必须经 `viewport.transformPoint` 反算到画板坐标后再放置
+- **拖放落点契约要明确**：中心对齐 vs 左上角对齐，二选一并在注释里写明；左上角对齐对超高卡片（几十列）体验更好
+
 ### 39. 表格卡片高度去掉 400 上限（2026-08-20）
 #### 现象
 80 列的大表只显示前 ~20 列，底部出现 "... 共 80 列" 截断提示。
