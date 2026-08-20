@@ -743,3 +743,24 @@ IDE 退出前打开某 .datachart 文件，下次启动自动重开时，卡片"
 - **复用现有数据结构**：BFS 状态直接用 `RelatedRowPos`，key 用 `makeRelatedKey`，与渲染路径同源，避免新旧 key 不匹配
 - **连通子图边界**：不属于该连通子图的孤立连线行不受影响（用户只关注选中的那张网络）
 
+### 39. 表格卡片高度去掉 400 上限（2026-08-20）
+#### 现象
+80 列的大表只显示前 ~20 列，底部出现 "... 共 80 列" 截断提示。
+#### 根因
+`KanbanBoard.addTableCard` / `loadFromChartData` 中 `height = Math.min(height, 400)` 硬编码 400px 上限，
+`KanbanCard.updateTableInfo` 同样 `Math.min(400.0, ...)`，导致 `(400-60)/18 ≈ 18.8` 行装不下全部列。
+#### 修复
+三处 `Math.min(height, 400)` / `Math.min(400.0, ...)` 全部去掉 400 限制：
+- 第一轮（2026-08-20）：改为 `Math.max(height, 400)`（保底最小高度 400）
+- 第二轮（2026-08-20，用户要求）：保底也去掉，**高度完全由列数决定，不设上下限**
+  - `KanbanBoard.addTableCard`：`height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT`（列数至少 3）
+  - `KanbanBoard.loadFromChartData`：同上
+  - `KanbanCard.updateTableInfo`：`h = Math.max(50.0, headerHeight + bodyH + padding)`（保留 50 仅防空表塌陷，正常表高度 = header + 列数×18）
+渲染端 `drawTableCard` 的 `maxRows` 是动态按 bounds 高度算的，无需改动。
+#### 副作用（预期内）
+- 列多的卡（如 80 列）会变 ~1500px 高，可能遮挡/影响排布
+- 导出 PDF/图片时包围盒自动包含整卡，图幅会变大
+#### 设计原则
+- **高度计算必须三处同步**：`addTableCard`（新建）、`loadFromChartData`（加载）、`updateTableInfo`（同步表结构），漏改任意一处会导致同一张表在不同路径下高度不一致
+- 若后续要控制遮挡，建议在"卡片内滚动"或"折叠双栏"方案上做，不要回到全局 400 截断
+

@@ -1231,7 +1231,7 @@ public class KanbanBoard extends JPanel {
 		}
 		int rowCount = Math.max(3, info.getColumns().size());
 		double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
-		height = Math.min(height, 400);
+		// 2026-08-20 高度完全由列数决定，不设上下限（80 列的卡会很高，属预期）
 
 		// 2026-08-01 改回固定宽度：所有表格卡片统一宽度，注释过长按宽度截断 + 省略号
 		// （之前 21 节按需加宽会让不同表宽度不一致，且注释过长也不会触发 truncateByWidth）
@@ -1640,10 +1640,9 @@ public class KanbanBoard extends JPanel {
 		// 这样 calculateTotalBounds 用真实 bounds 算，导出图正确；同时保留用户布局意图
 		for (ChartData.TableCardModel model : data.getTables()) {
 			TableInfo info = BoardPersistence.resolveTableInfo(model, project);
-			// 高度 = base + 行数 * 行高（上限 400）
+			// 高度 = base + 行数 * 行高（2026-08-20 不设上下限，列全部展示）
 			int rowCount = Math.max(3, info.getColumns().size());
 			double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
-			height = Math.min(height, 400);
 
 			// 2026-08-07 兼容旧 .datachart 文件：旧文件里 id 是 schema.table 拼接，
 			// 同一张表拖入两次时 id 完全相同，加载后连线全部指向 cards 列表里第一张

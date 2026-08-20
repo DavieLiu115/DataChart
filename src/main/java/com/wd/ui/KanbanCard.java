@@ -355,10 +355,11 @@ public class KanbanCard {
 		this.description = newInfo.getComment();
 
 		// 重新计算高度（包含新增列和保留展示的已删除列）
+		// 2026-08-20 高度完全由列数决定，不设 400 上限（与 KanbanBoard 高度计算保持一致）
 		int totalColCount = (newInfo.getColumns() == null ? 0 : newInfo.getColumns().size()) + deletedColumns.size();
 		double rowH = ROW_HEIGHT;
 		double bodyH = totalColCount * rowH;
-		double h = Math.min(400.0, Math.max(50.0, headerHeight + bodyH + padding));
+		double h = Math.max(50.0, headerHeight + bodyH + padding);
 		bounds.setRect(bounds.getX(), bounds.getY(), bounds.getWidth(), h);
 
 		// 如果有新增列，触发左侧划入动画
