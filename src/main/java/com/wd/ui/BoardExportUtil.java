@@ -147,7 +147,7 @@ public final class BoardExportUtil {
 			return false;
 		}
 		Rectangle2D exportArea = calculateTotalBounds(board.getCards());
-		LOG.warn("[DataChart export PDF] exportArea = x=" + (int) exportArea.getX()
+		LOG.debug("[DataChart export PDF] exportArea = x=" + (int) exportArea.getX()
 				+ " y=" + (int) exportArea.getY()
 				+ " w=" + (int) exportArea.getWidth()
 				+ " h=" + (int) exportArea.getHeight()
@@ -223,7 +223,7 @@ public final class BoardExportUtil {
 					.append((int) c.getBounds().getWidth()).append("x")
 					.append((int) c.getBounds().getHeight());
 		}
-		LOG.warn("[DataChart export] cards.size=" + board.getCards().size() + cardInfo
+		LOG.debug("[DataChart export] cards.size=" + board.getCards().size() + cardInfo
 				+ "\n  exportArea = x=" + (int) exportArea.getX()
 				+ " y=" + (int) exportArea.getY()
 				+ " w=" + (int) exportArea.getWidth()
