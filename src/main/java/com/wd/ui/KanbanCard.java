@@ -314,6 +314,17 @@ public class KanbanCard {
 	private javax.swing.Timer slideAnimTimer = null;
 
 	/**
+	 * 停止并释放动画定时器（2026-08-27：编辑器 dispose 时调用，
+	 * 防止 Swing Timer 持有卡片引用造成内存泄漏）。
+	 */
+	public void disposeTimers() {
+		if (slideAnimTimer != null) {
+			slideAnimTimer.stop();
+			slideAnimTimer = null;
+		}
+	}
+
+	/**
 	 * 替换卡片绑定的表元信息（带增量同步对比提示）。
 	 *
 	 * @param newInfo 新的表元信息

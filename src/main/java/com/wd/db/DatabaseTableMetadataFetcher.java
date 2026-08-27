@@ -244,7 +244,9 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			}
 			return cleanType(dataType.toString());
 		} catch (Exception e) {
-			LOG.warn("resolveColumnType failed", e);
+			// 2026-08-27：热路径（每列调用）失败降为 debug，避免大表异常时刷屏；
+			// 整表失败由 fetchTableInfo* 的 warn 汇总兜底
+			LOG.debug("resolveColumnType failed", e);
 			return "";
 		}
 	}
@@ -275,7 +277,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 				}
 			}
 		} catch (Exception e) {
-			LOG.warn("hasColumnAttribute failed for " + attributeEnum, e);
+			LOG.debug("hasColumnAttribute failed for " + attributeEnum, e);
 		}
 		return false;
 	}
@@ -290,7 +292,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			m.setAccessible(true);
 			return m.invoke(target, arg);
 		} catch (Exception e) {
-			LOG.warn("invokeWithArg failed: " + target.getClass().getSimpleName() + "." + method, e);
+			LOG.debug("invokeWithArg failed: " + target.getClass().getSimpleName() + "." + method, e);
 			return null;
 		}
 	}
@@ -335,14 +337,22 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 		return null;
 	}
 
+	/** 插件启用状态缓存（2026-08-27：isAvailable 在拖表/同步/遍历数据源多处调用，避免反复查） */
+	private static volatile Boolean databasePluginEnabled;
+
 	private static boolean isDatabasePluginEnabled() {
+		Boolean cached = databasePluginEnabled;
+		if (cached != null) {
+			return cached;
+		}
 		try {
 			PluginId id = PluginId.getId(DATABASE_PLUGIN_ID);
 			// isPluginInstalled 兼容旧版 SDK（isPluginEnabled 是较新版本才有的 API）
-			return PluginManagerCore.isPluginInstalled(id);
+			databasePluginEnabled = PluginManagerCore.isPluginInstalled(id);
 		} catch (Exception e) {
-			return false;
+			databasePluginEnabled = false;
 		}
+		return databasePluginEnabled;
 	}
 
 	/** 加载并缓存 Database 插件的关键反射类 */
@@ -405,7 +415,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			}
 			return invokeMethod(m, target);
 		} catch (Exception e) {
-			LOG.warn("invokeNoArgs failed: " + target.getClass().getSimpleName() + "." + method, e);
+			LOG.debug("invokeNoArgs failed: " + target.getClass().getSimpleName() + "." + method, e);
 			return null;
 		}
 	}
@@ -418,7 +428,7 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			m.setAccessible(true);
 			return m.invoke(target, args);
 		} catch (Exception e) {
-			LOG.warn("invokeMethod failed: " + m.getName(), e);
+			LOG.debug("invokeMethod failed: " + m.getName(), e);
 			return null;
 		}
 	}

@@ -1,6 +1,8 @@
 package com.wd.editor;
 
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.fileEditor.FileEditor;
@@ -10,6 +12,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.wd.ui.DataChartView;
+import com.wd.ui.NotificationUtil;
 import java.awt.BorderLayout;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
@@ -21,14 +24,21 @@ import org.jetbrains.annotations.Nullable;
 
 public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
+	private static final Logger LOG = Logger.getInstance(DataChartEditor.class);
+
 	private final JPanel editorPanel;
 	private final Project project;
 	private final VirtualFile file;
 	private DataChartView dataView;
 	private volatile boolean initialized = false;
 	private boolean modified = false;
-	private boolean loading = false;
+	private volatile boolean loading = false;
+	/** dispose 已执行：丢弃一切挂起的异步加载/回调（2026-08-27 复查补充） */
+	private volatile boolean disposed = false;
 	private final PropertyChangeSupport propertyChangeSupport = new PropertyChangeSupport(this);
+
+	/** 最后一次保存成功时的文件修改戳，用于 dispose 时检测磁盘是否被外部修改（2026-08-27） */
+	private long lastSavedStamp = -1;
 
 	public DataChartEditor(Project project, VirtualFile file) {
 		this.project = project;
@@ -74,23 +84,41 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	}
 
 	/**
-	 * 从文件中加载看板内容（.datachart JSON）
+	 * 从文件中加载看板内容（.datachart JSON）。
+	 *
+	 * <p>2026-08-27 优化：文件字节读取移到后台线程，避免大文件 IO 卡 EDT；
+	 * JSON 解析与看板状态更新回到 EDT 执行（Swing 组件只能在 EDT 操作）。</p>
 	 */
 	private void loadFromFile() {
 		if (file == null || dataView == null) {
 			return;
 		}
-		try {
-			loading = true;
-			String content = new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
-			if (content != null && !content.trim().isEmpty()) {
-				dataView.loadFromJson(content);
+		loading = true;
+		ApplicationManager.getApplication().executeOnPooledThread(() -> {
+			String content = null;
+			try {
+				content = ReadAction.compute(() -> {
+					try {
+						return new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
+					} catch (Exception ex) {
+						return null;
+					}
+				});
+			} catch (Exception e) {
+				LOG.warn("读取 .datachart 文件失败: " + file.getName(), e);
 			}
-		} catch (Exception e) {
-			// 文件为空或不存在时忽略，保持空看板
-		} finally {
-			loading = false;
-		}
+			final String loaded = content;
+			javax.swing.SwingUtilities.invokeLater(() -> {
+				loading = false;
+				// dispose 后丢弃加载结果，避免重新填充已清理的看板（内存泄漏/悬空引用）
+				if (disposed) {
+					return;
+				}
+				if (loaded != null && !loaded.trim().isEmpty()) {
+					dataView.loadFromJson(loaded);
+				}
+			});
+		});
 	}
 
 	@Override
@@ -137,27 +165,45 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	}
 
 	/**
-	 * 保存看板内容到文件（Ctrl+S / Command+S 时触发）
+	 * 保存看板内容到文件（Ctrl+S / Command+S 时触发）。
+	 *
+	 * <p>2026-08-27：写入失败不再静默吞掉，改为 LOG + 气泡通知；
+	 * 成功后记录文件修改戳，供 dispose 外部修改检测使用。</p>
 	 */
 	public void saveDocument() {
 		if (file == null || dataView == null) {
 			return;
 		}
+		// 2026-08-27 复查补充：异步加载未完成时禁止保存，
+		// 否则 serializeToJson 会序列化尚未加载的空看板并覆盖磁盘原文件
+		if (loading) {
+			NotificationUtil.info("正在加载文件", "文件内容尚未加载完成，请稍后再保存");
+			return;
+		}
 		try {
 			// 序列化看板为 JSON
 			String json = dataView.serializeToJson();
+			final boolean[] ok = {false};
 			// 写入文件（字节方式，保持文件类型不变）
 			ApplicationManager.getApplication().runWriteAction(() -> {
 				try {
 					file.setBinaryContent(json.getBytes(StandardCharsets.UTF_8));
+					ok[0] = true;
 				} catch (Exception e) {
-					// 写入失败
+					LOG.warn("保存 .datachart 文件失败: " + file.getName(), e);
 				}
 			});
+			if (!ok[0]) {
+				NotificationUtil.error("保存失败",
+						"写入文件失败：" + file.getName() + "，请检查磁盘空间或文件权限");
+				return;
+			}
+			lastSavedStamp = file.getModificationStamp();
 			// 保存成功后重置修改状态（文件名恢复，星号消失）
 			setModified(false);
 		} catch (Exception e) {
-			// 保存失败
+			LOG.warn("保存 .datachart 序列化失败", e);
+			NotificationUtil.error("保存失败", "序列化看板失败：" + e.getMessage());
 		}
 	}
 
@@ -185,9 +231,23 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	@Override
 	public void dispose() {
-		// 自动保存未保存的改动（关闭/切换编辑器时）
+		disposed = true; // 先置位，阻断挂起的异步加载回调
+		// 2026-08-27 修复：不再无条件自动保存。
+		// 若磁盘文件在本编辑器上次保存后被外部工具修改过，放弃自动落盘，
+		// 避免静默覆盖外部改动（此前会绕过 IDE 未保存确认直接写盘）。
 		if (modified) {
-			saveDocument();
+			boolean changedExternally = false;
+			try {
+				long currentStamp = ReadAction.compute(file::getModificationStamp);
+				changedExternally = lastSavedStamp >= 0 && currentStamp != lastSavedStamp;
+			} catch (Exception e) {
+				LOG.warn("dispose 时读取文件修改戳失败", e);
+			}
+			if (changedExternally) {
+				LOG.warn("文件在磁盘上已被外部修改，放弃自动保存以避免覆盖: " + file.getName());
+			} else {
+				saveDocument();
+			}
 		}
 		// 清理资源
 		editorPanel.removeAll();
@@ -202,25 +262,32 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	}
 
 	/**
-	 * 获取修改状态属性名，兼容不同版本 API：
+	 * 获取修改状态属性名，兼容不同版本 API（结果静态缓存，避免每次 setModified 反射）：
 	 * <ul>
 	 *   <li>旧版（2022.3 等）：{@code FileEditor.PROP_MODIFIED} 常量</li>
 	 *   <li>新版（2025.3 等）：{@code FileEditor.getPropModified()} 静态方法</li>
 	 * </ul>
 	 */
+	private static volatile String cachedModifiedPropertyName;
+
 	private static String getModifiedPropertyName() {
+		if (cachedModifiedPropertyName != null) {
+			return cachedModifiedPropertyName;
+		}
 		try {
 			// 新版优先：getPropModified() 静态方法
 			java.lang.reflect.Method method = FileEditor.class.getMethod("getPropModified");
 			Object result = method.invoke(null);
 			if (result instanceof String) {
-				return (String) result;
+				cachedModifiedPropertyName = (String) result;
+				return cachedModifiedPropertyName;
 			}
 		} catch (NoSuchMethodException ignored) {
 			// 旧版没有该方法
 		} catch (Exception ignored) {
 		}
 		// 旧版回退：PROP_MODIFIED 常量
-		return "modified";
+		cachedModifiedPropertyName = "modified";
+		return cachedModifiedPropertyName;
 	}
 }

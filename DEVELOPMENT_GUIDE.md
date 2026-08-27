@@ -796,6 +796,57 @@ y = boardPoint.getY();
 - **坐标链路先对齐，再谈对齐方式**：IDE DnD 屏幕坐标必须先转 JPanel 局部坐标，否则 transform 反算全错
 - **拖放落点契约要明确**：中心 vs 左上角，二选一并注释写明；列多的表建议左上角
 
+### 42. 全项目性能/线程安全修复批（2026-08-27）
+按审查报告优先级修复了 8 项，涉及 6 个文件：
+#### 已修复
+1. **dispose 不再无条件自动保存**（`DataChartEditor`）
+   - 新增 `lastSavedStamp`（保存时记录文件修改戳）；dispose 时若磁盘文件被外部工具改过则放弃自动落盘（避免覆盖外部改动），否则照常保存
+   - 新增 `NotificationUtil.error` + `LOG`：保存失败不再静默吞掉（P2-8）
+   - `getModifiedPropertyName()` 反射结果静态缓存（volatile，P3-18）
+2. **拖表/同步表结构后台化**（`TableDropHandler.processTable` / `KanbanBoard.syncTableStructure`）
+   - 反射查库移 `executeOnPooledThread` + `ReadAction`（PSI/DAS 必须 read action），结果 `SwingUtilities.invokeLater` 回 EDT
+   - 回 EDT 校验：project.isDisposed()（handler）、cards.contains(card)（sync 期间卡可能被删）
+3. **每帧全量重绘裁剪**（`KanbanBoard`）
+   - `drawCards(g2d, dark, Rectangle2D visibleArea)`：与视口不相交的卡片跳过绘制（selected 状态仍更新保持一致）
+   - `computeVisibleBoardArea()`：JPanel bounds 经 `viewport.getInverse()` 反算画板坐标可见区；宽高<=0 或逆变换异常返回 null 退回不裁剪
+   - 导出路径传 null 不裁剪（需全量）
+4. **导出后台化**（`DataChartView.exportAsPdf/exportAsImage`）
+   - `ProgressManager.run(Task.Modal)`：PDF 编码/大图创建+JPEG 编码移后台；模态进度框阻塞 EDT 交互 → board 状态无竞态；结果 `invokeLater` 回 EDT 弹通知
+5. **打开文件 IO 后台化**（`DataChartEditor.loadFromFile`）
+   - `file.contentsToByteArray()` 移后台（ReadAction），JSON 解析回 EDT
+6. **dispose 完整清理**（`KanbanBoard.dispose` / `KanbanCard.disposeTimers`）
+   - 停止所有卡片 `slideAnimTimer` + 清空 cards/connections/选中集合，防止 Swing Timer 持引用泄漏
+7. **裸 printStackTrace → LOG.warn**（KanbanBoard 3 处）
+8. **反射热路径日志降级**（`DatabaseTableMetadataFetcher`）
+   - `resolveColumnType`/`hasColumnAttribute`/`invokeWithArg`/`invokeNoArgs`/`invokeMethod` 失败改 `LOG.debug`（大表每列失败会刷屏）；整表失败由 `fetchTableInfo*` 的 warn 汇总
+#### 未修复（风险高，留待单独批）
+- **P2-16 `DataChartView extends DialogWrapper` 反模式**：改为普通 JPanel 涉及 GUI Designer `.form` 绑定改造，风险高收益中等，需单独评估
+#### 设计原则
+- **后台线程回 EDT 回调三要素**：project 存活校验 + 目标对象（卡片/组件）仍存在校验 + Swing 更新必须 EDT
+- **PSI/DAS 对象访问必须在 ReadAction 中**（拖表后台化后尤其关键）
+- **Task.Modal 顺带解决竞态**：模态进度框阻塞 EDT，后台线程读 board 状态安全
+- **定时器/监听器必须随 dispose 停止**：Swing Timer 会持有卡片引用
+- **热路径日志降级原则**：每对象×每字段级失败用 debug，整体失败用 warn 汇总
+
+### 43. 异步化引入的回归修复（2026-08-27 复查批）
+上一批后台化改造引入了 3 个新问题，复查时发现并修复：
+1. **异步加载回调悬空（P0）**：`loadFromFile` 后台读取的 `invokeLater` 回调在 `dispose()` 后仍会执行，
+   重新填充已清理的看板 → 新增 `disposed` 标志：`dispose()` 最先置位，回调内 `if (disposed) return;`
+   **教训：任何后台任务 + 生命周期（dispose/关闭）组合，必须加 disposed 守卫，且置位必须在清理最前面**
+2. **保存竞态（P1）**：异步加载未完成时 Ctrl+S，`serializeToJson()` 序列化空看板覆盖磁盘原文件
+   → `saveDocument()` 开头 `if (loading)` 拒绝保存 + 提示
+   **教训：loading 标志不再只是"屏蔽修改状态"，还承担"数据未就绪"语义，所有读数据源的操作都要检查**
+3. **裁剪区域坐标系（P1）**：`computeVisibleBoardArea()` 用 `getBounds()`（父容器坐标，可能非 0 起点）
+   → 改用 `getWidth()/getHeight()` 构造 `(0,0,w,h)` 局部坐标
+   **教训：组件自身范围的裁剪计算用 getWidth/getHeight 而非 getBounds**
+#### 复查确认
+- `drawGrid` 的 null 分支本就用逆变换做了可见裁剪（之前审查误报 P2-10）
+- dispose 链完整：`DataChartEditor.dispose → DataChartView.dispose → KanbanBoard.dispose`（timers/监听器/集合全清理）
+#### 仍未修（维持评估结论）
+- P2-16 `DataChartView extends DialogWrapper` 反模式：.form 绑定改造风险高，需单独批次
+- P2-11 `mouseMoved` 每帧 `findCardAt`：O(n) 遍历开销极小，收益低
+- 插件状态/反射类缓存（`isDatabasePluginEnabled` volatile 缓存已做，`METHOD_CACHE` 静态引用低风险）
+
 ### 39. 表格卡片高度去掉 400 上限（2026-08-20）
 #### 现象
 80 列的大表只显示前 ~20 列，底部出现 "... 共 80 列" 截断提示。

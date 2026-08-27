@@ -1,6 +1,10 @@
 package com.wd.ui;
 
+import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.project.Project;
+import com.intellij.openapi.progress.ProgressIndicator;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SearchTextField;
@@ -24,6 +28,7 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.border.MatteBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -217,17 +222,28 @@ public class DataChartView extends DialogWrapper {
 			} else {
 				file = new File(file.getParentFile(), file.getName() + ".pdf");
 			}
-		boolean ok = BoardExportUtil.exportToPdf(kanbanBoard, file);
-		if (ok) {
-			NotificationUtil.info("导出成功", "PDF 已保存到：" + file.getAbsolutePath());
-		} else {
-			NotificationUtil.error("导出失败", "保存 PDF 失败，请查看日志");
+			final File target = file;
+			// 2026-08-27 优化：PDF 编码 + 文件 IO 移到后台线程；
+			// Task.Modal 模态进度框会阻塞 EDT 交互，保证 board 状态不被修改（无竞态）
+			ProgressManager.getInstance().run(new Task.Modal(project, "导出 PDF", true) {
+				@Override
+				public void run(@NotNull ProgressIndicator indicator) {
+					indicator.setIndeterminate(true);
+					boolean ok = BoardExportUtil.exportToPdf(kanbanBoard, target);
+					ApplicationManager.getApplication().invokeLater(() -> {
+						if (ok) {
+							NotificationUtil.info("导出成功", "PDF 已保存到：" + target.getAbsolutePath());
+						} else {
+							NotificationUtil.error("导出失败", "保存 PDF 失败，请查看日志");
+						}
+					});
+				}
+			});
 		}
 		}
-	}
 
-	/**
-	 * 导出当前画板为图片（JPG）
+		/**
+		* 导出当前画板为图片（JPG）
 	 *
 	 * <p>默认文件名 = 当前 datachart 文件名 + yyyyMMdd_HHmmss.jpg。</p>
 	 */
@@ -252,14 +268,24 @@ public class DataChartView extends DialogWrapper {
 			} else {
 				file = new File(file.getParentFile(), file.getName() + ".jpg");
 			}
-		boolean ok = BoardExportUtil.exportToImage(kanbanBoard, file, "jpg", 2.0);
-		if (ok) {
-			NotificationUtil.info("导出成功", "图片已保存到：" + file.getAbsolutePath());
-		} else {
-			NotificationUtil.error("导出失败", "保存图片失败，请查看日志");
+			final File target = file;
+			// 2026-08-27 优化：大图创建（2.0 scale）+ JPEG 编码移到后台线程
+			ProgressManager.getInstance().run(new Task.Modal(project, "导出图片", true) {
+				@Override
+				public void run(@NotNull ProgressIndicator indicator) {
+					indicator.setIndeterminate(true);
+					boolean ok = BoardExportUtil.exportToImage(kanbanBoard, target, "jpg", 2.0);
+					ApplicationManager.getApplication().invokeLater(() -> {
+						if (ok) {
+							NotificationUtil.info("导出成功", "图片已保存到：" + target.getAbsolutePath());
+						} else {
+							NotificationUtil.error("导出失败", "保存图片失败，请查看日志");
+						}
+					});
+				}
+			});
 		}
 		}
-	}
 
 	/**
 	 * 切换全屏模式

@@ -3,11 +3,14 @@ package com.wd.db;
 import com.intellij.ide.dnd.DnDEvent;
 import com.intellij.ide.dnd.DnDManager;
 import com.intellij.ide.dnd.DnDTarget;
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import java.awt.Point;
 import java.awt.datatransfer.DataFlavor;
 import javax.swing.JComponent;
+import javax.swing.SwingUtilities;
 
 /**
  * 看板区域的拖拽目标处理器
@@ -161,7 +164,11 @@ public class TableDropHandler implements DnDTarget {
 	}
 
 	/**
-	 * 处理拖入的数据库表
+	 * 处理拖入的数据库表。
+	 *
+	 * <p>2026-08-27 优化：表元信息查询（反射 + 可能的远程数据库 IO）移到后台线程，
+	 * 避免拖入大表/慢数据源时冻结 IDE 界面；结果通过 {@link SwingUtilities#invokeLater}
+	 * 回 EDT 回调，回调内先校验 project 存活。</p>
 	 */
 	private void processTable(Object dbTable, Point dropPoint) {
 		try {
@@ -174,28 +181,44 @@ public class TableDropHandler implements DnDTarget {
 					+ "，对象类型: " + dbTable.getClass().getName()
 					+ "，拖放屏幕坐标: (" + (dropPoint == null ? "null" : dropPoint.x + "," + dropPoint.y) + ")");
 
-			// 直接基于拖拽对象查询元信息（比名字匹配更可靠）
-			TableInfo info;
-			if (fetcher instanceof DatabaseTableMetadataFetcher) {
-				info = ((DatabaseTableMetadataFetcher) fetcher).fetchTableInfoByElement(project, dbTable);
-			} else {
-				// 回退到按名字查询
-				String datasourceName = getDataSourceName(dbTable);
-				LOG.info("[DnD] 回退按名字查询: datasource=" + datasourceName + ", table=" + tableName);
-				info = fetcher.fetchTableInfo(project, datasourceName, tableName);
-			}
-			if (info == null) {
-				LOG.warn("[DnD] 获取表元信息失败（返回 null），表: " + tableName);
-				return;
-			}
-			LOG.info("[DnD] 获取表元信息成功: " + info);
-			if (callback != null) {
-				LOG.info("[DnD] 回调看板绘制，表: " + tableName
-						+ ", 字段数: " + info.getColumns().size());
-				callback.onTableDropped(info, dropPoint);
-			} else {
-				LOG.warn("[DnD] 没有注册回调，无法绘制");
-			}
+			ApplicationManager.getApplication().executeOnPooledThread(() -> {
+				TableInfo info;
+				try {
+					// PSI/DAS 对象访问必须在 ReadAction 中
+					info = ReadAction.compute(() -> {
+						if (fetcher instanceof DatabaseTableMetadataFetcher) {
+							// 直接基于拖拽对象查询元信息（比名字匹配更可靠）
+							return ((DatabaseTableMetadataFetcher) fetcher)
+									.fetchTableInfoByElement(project, dbTable);
+						}
+						// 回退到按名字查询
+						String datasourceName = getDataSourceName(dbTable);
+						LOG.info("[DnD] 回退按名字查询: datasource=" + datasourceName + ", table=" + tableName);
+						return fetcher.fetchTableInfo(project, datasourceName, tableName);
+					});
+				} catch (Exception e) {
+					LOG.warn("[DnD] 后台查询表元信息异常", e);
+					info = null;
+				}
+				final TableInfo result = info;
+				SwingUtilities.invokeLater(() -> {
+					if (project != null && project.isDisposed()) {
+						return; // 工程已关闭，丢弃结果
+					}
+					if (result == null) {
+						LOG.warn("[DnD] 获取表元信息失败（返回 null），表: " + tableName);
+						return;
+					}
+					LOG.info("[DnD] 获取表元信息成功: " + result);
+					if (callback != null) {
+						LOG.info("[DnD] 回调看板绘制，表: " + tableName
+								+ ", 字段数: " + result.getColumns().size());
+						callback.onTableDropped(result, dropPoint);
+					} else {
+						LOG.warn("[DnD] 没有注册回调，无法绘制");
+					}
+				});
+			});
 		} catch (Exception e) {
 			LOG.warn("[DnD] 处理拖拽表时异常", e);
 		}

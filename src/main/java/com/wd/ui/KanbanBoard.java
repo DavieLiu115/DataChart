@@ -1,5 +1,7 @@
 package com.wd.ui;
 
+import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.Gray;
@@ -252,7 +254,8 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 释放资源：注销 DnD 拖拽目标，避免编辑器关闭后仍持有对已释放组件的引用。
+	 * 释放资源：注销 DnD 拖拽目标 + 停止所有卡片动画定时器，
+	 * 避免编辑器关闭后仍持有对已释放组件的引用。
 	 *
 	 * <p>由上层（{@link DataChartView#dispose()}）在编辑器销毁时调用。</p>
 	 */
@@ -265,6 +268,16 @@ public class KanbanBoard extends JPanel {
 			}
 			dropHandler = null;
 		}
+		// 2026-08-27：停止所有卡片动画 Timer，防止 Timer 持有卡片引用泄漏
+		for (KanbanCard card : cards) {
+			card.disposeTimers();
+		}
+		cards.clear();
+		connections.clear();
+		linkedRowsCache = null;
+		selectedCards.clear();
+		selectedCard = null;
+		activeHighlightCard = null;
 	}
 
 	/**
@@ -553,7 +566,7 @@ public class KanbanBoard extends JPanel {
 
 						repaint();
 					} catch (Exception ex) {
-						ex.printStackTrace();
+						LOG.warn("磁吸吸附计算失败", ex);
 					}
 				} else if (isSelecting) {
 					// 框选（2026-08-20）：更新选区矩形（画板坐标），实时选中相交的卡片
@@ -950,7 +963,7 @@ public class KanbanBoard extends JPanel {
 				}
 			}
 		} catch (Exception e) {
-			e.printStackTrace();
+			LOG.warn("findCardAt 坐标转换异常", e);
 		}
 		return null;
 	}
@@ -1150,14 +1163,18 @@ public class KanbanBoard extends JPanel {
 			conn.draw(g2d);
 		}
 
-		// 5. 绘制所有卡片
-		drawCards(g2d, dark);
+		// 5. 绘制所有卡片（导出场景传 null 不裁剪，需要全量）
+		drawCards(g2d, dark, null);
 	}
 
 	/**
 	 * 绘制所有卡片（含连线占用行高亮、关联列高亮、预览高亮）。
+	 *
+	 * <p>2026-08-27 优化：支持可见区域裁剪（画板坐标），与视口不相交的卡片
+	 * 跳过绘制，避免几十张高列卡片在每次 repaint 时全量 drawString 卡帧。
+	 * 传 {@code null} 表示不裁剪（导出场景需画全量）。</p>
 	 */
-	private void drawCards(Graphics2D g2d, boolean dark) {
+	private void drawCards(Graphics2D g2d, boolean dark, Rectangle2D visibleArea) {
 		// 2026-08-03 优化：连线占用行缓存只在连线增删时失效，避免每次重绘全量重算
 		if (linkedRowsCache == null) {
 			linkedRowsCache = computeLinkedRows();
@@ -1178,6 +1195,10 @@ public class KanbanBoard extends JPanel {
 		for (KanbanCard card : cards) {
 			boolean isSelected = (card == selectedCard || selectedCards.contains(card));
 			card.setSelected(isSelected);
+			// 可见区域裁剪：选中状态仍更新（保持状态一致），但跳过绘制
+			if (visibleArea != null && !visibleArea.intersects(card.getBounds())) {
+				continue;
+			}
 			Map<Integer, Color> merged = new HashMap<>(
 					linkedRowsCache.getOrDefault(card, Collections.emptyMap()));
 			for (String key : relatedRowKeys) {
@@ -1191,6 +1212,37 @@ public class KanbanBoard extends JPanel {
 				merged.putAll(preview);
 			}
 			card.draw(g2d, dark, merged);
+		}
+	}
+
+	/**
+	 * 计算当前视口在画板坐标系下的可见矩形（供绘制裁剪用）。
+	 *
+	 * <p>JPanel 的 {@link #getBounds()} 是屏幕坐标，经 viewport 逆变换得到画板坐标范围；
+	 * 面板未布局（宽高<=0）时返回 null 表示不裁剪。</p>
+	 */
+	private Rectangle2D computeVisibleBoardArea() {
+		// 注意：必须用 (0,0,w,h) 局部坐标而非 getBounds()（后者是父容器坐标，
+		// 若面板在容器中非 (0,0) 起始会导致裁剪区域偏移、误剪掉可见卡片）
+		int w = getWidth();
+		int h = getHeight();
+		if (w <= 0 || h <= 0) {
+			return null;
+		}
+		Rectangle view = new Rectangle(0, 0, w, h);
+		try {
+			AffineTransform inverse = viewport.getInverse();
+			Point2D p1 = new Point2D.Double(view.x, view.y);
+			Point2D p2 = new Point2D.Double(view.x + view.width, view.y + view.height);
+			inverse.transform(p1, p1);
+			inverse.transform(p2, p2);
+			double minX = Math.min(p1.getX(), p2.getX());
+			double maxX = Math.max(p1.getX(), p2.getX());
+			double minY = Math.min(p1.getY(), p2.getY());
+			double maxY = Math.max(p1.getY(), p2.getY());
+			return new Rectangle2D.Double(minX, minY, maxX - minX, maxY - minY);
+		} catch (Exception e) {
+			return null; // 逆变换异常时退回不裁剪
 		}
 	}
 
@@ -1247,8 +1299,8 @@ public class KanbanBoard extends JPanel {
 			}
 		}
 
-		// 3. 绘制所有卡片
-		drawCards(g2d, isDarkTheme());
+		// 3. 绘制所有卡片（2026-08-27：按可见区域裁剪，跳过视口外卡片）
+		drawCards(g2d, isDarkTheme(), computeVisibleBoardArea());
 
 		// 3.5 绘制框选矩形（2026-08-20：空白拖拽选区，画板坐标，画在卡片上方）
 		if (isSelecting && selectionRect != null) {
@@ -1346,7 +1398,7 @@ public class KanbanBoard extends JPanel {
 				g2d.drawLine(startX, y, endX, y);
 			}
 		} catch (Exception e) {
-			e.printStackTrace();
+			LOG.warn("drawGrid 绘制网格异常", e);
 		}
 	}
 
@@ -1625,6 +1677,9 @@ public class KanbanBoard extends JPanel {
 	 * 调用 {@code fetchTableInfo(project, datasource, tableName)} 拉取最新表结构，
 	 * 成功后通过 {@link KanbanCard#setTableInfo} 替换卡片绑定。</p>
 	 *
+	 * <p>2026-08-27 优化：查库（反射 + 可能的远程数据库 IO）移到后台线程，
+	 * 避免慢数据源冻结 EDT；回 EDT 后校验 project 存活、卡片是否仍在画板。</p>
+	 *
 	 * <p>失败时弹错误提示（不动卡片）。</p>
 	 */
 	private void syncTableStructure(KanbanCard card) {
@@ -1636,10 +1691,39 @@ public class KanbanBoard extends JPanel {
 		String tableName = old.getName();
 		com.wd.db.TableMetadataService svc =
 				com.wd.db.TableMetadataService.getInstance(project);
-		TableInfo fresh = svc.getFetcher().fetchTableInfo(project, dsName, tableName);
+
+		ApplicationManager.getApplication().executeOnPooledThread(() -> {
+			final TableInfo fresh;
+			try {
+				fresh = ReadAction.compute(() ->
+						svc.getFetcher().fetchTableInfo(project, dsName, tableName));
+			} catch (Exception e) {
+				LOG.warn("后台同步表结构查询失败: " + tableName, e);
+				return;
+			}
+			javax.swing.SwingUtilities.invokeLater(() -> {
+				if (project.isDisposed()) {
+					return;
+				}
+				applySyncedStructure(card, old, dsName, tableName, fresh);
+			});
+		});
+	}
+
+	/**
+	 * 在 EDT 上应用同步结果（syncTableStructure 的后续处理）。
+	 *
+	 * <p>查询期间用户可能删除/关闭了卡片，回到 EDT 后先校验卡片仍在画板。</p>
+	 */
+	private void applySyncedStructure(KanbanCard card, TableInfo old,
+									  String dsName, String tableName, TableInfo fresh) {
 		if (fresh == null) {
 			NotificationUtil.error("同步失败",
 					"无法获取表结构：" + tableName + "（数据源：" + dsName + "）");
+			return;
+		}
+		// 查询期间卡片可能已被删除，此时丢弃同步结果
+		if (!cards.contains(card)) {
 			return;
 		}
 
