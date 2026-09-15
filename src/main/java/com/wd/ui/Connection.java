@@ -119,6 +119,18 @@ public class Connection {
 		return color;
 	}
 
+	/**
+	 * 对外暴露连线实际渲染色（{@link #resolveLineColor()} 的公开入口）。
+	 *
+	 * <p>供 {@code KanbanBoard} 计算"连线占用行/终点行背景色"使用，
+	 * 保证：线是什么颜色 → 它落在的那一行背景就是什么颜色。</p>
+	 *
+	 * @return 连线实际渲染色（起点行高亮色优先，否则 palette 色）
+	 */
+	public Color getResolvedLineColor() {
+		return resolveLineColor();
+	}
+
 	public void draw(Graphics2D g2d) {
 		Point2D sourcePoint = source.getRowRight(sourceRow);
 		Point2D targetPoint = target.getRowLeft(targetRow);

@@ -192,6 +192,16 @@ public class KanbanBoard extends JPanel {
 			new Color(0x757575), // 浅色主题：深灰，清晰可见
 			new Color(0xAAAAAA)); // 深色主题：浅灰，避免与暗背景对比不足
 
+	/**
+	 * 连线预览：目标行"落点"高亮色（2026-09-16）。
+	 *
+	 * <p>拖线悬停到哪一行，哪一行背景亮起浅绿色（深色主题用深绿），
+	 * 与预览线的灰色区分开，明确指示"松手后连线将落到这一行"。</p>
+	 */
+	private static final Color CONNECTION_TARGET_PREVIEW_COLOR = new JBColor(
+			new Color(0xBFE8C5), // 浅色主题：淡绿（与"同步新增列"高亮风格一致）
+			new Color(0x33553F)); // 深色主题：深绿
+
 	/** 对齐辅助线颜色（深色主题下稍亮，浅色主题下稍深） */
 	private static final Color ALIGN_GUIDE_COLOR_LIGHT = new Color(0xFE9933);
 	private static final Color ALIGN_GUIDE_COLOR_DARK = new Color(0xFFB266);
@@ -510,9 +520,11 @@ public class KanbanBoard extends JPanel {
 						Point2D tp = viewport.transformPoint(e.getPoint());
 						int targetRow = targetCard.getRowIndexAt(tp.getX(), tp.getY());
 						if (targetRow >= 0) {
+							// 目标行"落点"高亮（2026-09-16）：拖到哪行哪行亮（浅绿），
+							// 与预览线灰色区分，明确指示松手后连线将落在这一行
 							previewHighlightRows
 									.computeIfAbsent(targetCard, k -> new HashMap<>())
-									.put(targetRow, CONNECTION_PREVIEW_COLOR);
+									.put(targetRow, CONNECTION_TARGET_PREVIEW_COLOR);
 							// 2026-08-04：记录最后一次 hover 的目标，
 							// 让 mouseReleased 即使松手在空白处也能建线
 							lastHoverTargetCard = targetCard;
@@ -673,6 +685,8 @@ public class KanbanBoard extends JPanel {
 					setActiveHighlight(card, rowIndex);
 					setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 				}
+				// 行高亮变化会改变连线的实际渲染色 → 失效占用行缓存，让终点行背景同步刷新
+				linkedRowsCache = null;
 				repaint();
 			}
 		};
@@ -1583,11 +1597,16 @@ public class KanbanBoard extends JPanel {
 
 	/**
 	 * 计算每张卡的连线占用行（每次重绘前调用）。
+	 *
+	 * <p>2026-09-16：颜色从 {@code conn.getColor()}（palette 色）改为
+	 * {@link Connection#getResolvedLineColor()}（连线实际渲染色），
+	 * 实现"连线落在哪一行，哪一行背景就是连线的颜色"：
+	 * 起点行被高亮（橙色）时，线变橙 → 终点行背景也跟着变橙，整条线（含两端行）一个颜色。</p>
 	 */
 	private Map<KanbanCard, Map<Integer, Color>> computeLinkedRows() {
 		Map<KanbanCard, Map<Integer, Color>> result = new HashMap<>();
 		for (Connection conn : connections) {
-			Color c = conn.getColor();
+			Color c = conn.getResolvedLineColor();
 			result.computeIfAbsent(conn.getSource(), k -> new HashMap<>())
 					.putIfAbsent(conn.getSourceRow(), c);
 			result.computeIfAbsent(conn.getTarget(), k -> new HashMap<>())
@@ -2020,6 +2039,8 @@ public class KanbanBoard extends JPanel {
 		this.activeHighlightCard = null;
 		this.activeHighlightRow = -1;
 		relatedRowKeys.clear();
+		// 取消激活高亮后连线渲染色可能回到 palette 色 → 失效占用行缓存
+		linkedRowsCache = null;
 	}
 
 	/**
