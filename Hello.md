@@ -1,5 +1,7 @@
 ### 把数据库的表画出来
 
+### 古法编程
+
 时光荏苒，好久不见。
 
 随着 AI 的发展，感觉写文章好像没什么意义了。尤其是技术博客，我现在也是什么都问AI，不像以前用谷歌或者 Bing 去搜索什么技术博客，解决方案。
@@ -14,27 +16,49 @@
 
 其实这些都是不对的，不应该是这样的。
 
-前几年我开发了一个 idea 的插件：DataTools，前前后后大半年吧，纯古法编程，这个插件算是我的集大成之作吧，可以完全取代 Idea 的 Database 插件。
-
-
-![image-20260911163005890](/Users/lww/Library/Application Support/typora-user-images/image-20260911163005890.png)
-
-![image-20260911163043239](/Users/lww/Library/Application Support/typora-user-images/image-20260911163043239.png)
-
-![image-20260911163230566](/Users/lww/Library/Application Support/typora-user-images/image-20260911163230566.png)
+前几年我开发了一个 idea 的插件：DataTools，前前后后大半年吧，纯古法编程，这个插件算是集大成之作吧，对标 Idea 的 Database 插件。
 
 ![image-20260911163314825](/Users/lww/Library/Application Support/typora-user-images/image-20260911163314825.png)
 
-![image-20260911163508864](/Users/lww/Library/Application Support/typora-user-images/image-20260911163508864.png)
+
 
 ![image-20260911163906771](/Users/lww/Library/Application Support/typora-user-images/image-20260911163906771.png)
 
-1. 自己管理数据库连接
-2. 根据注释搜索表
-3. 根据表查询相关文件并定位
-4. 代码生成
-5. Excel 导出
-6. 查询列
-7. 表关系维护
-8. 导出 PDF 和图片
+主要就是自己管理数据库连接；根据表的名称可以查询相关文件并导航过去；生成代码；导出 Excel；最重要的就是可以维护表之间的关系，然后可以导出 pdf 和图片。
+
+不过一直都是自己在用，没有发布到 idea 插件市场。
+
+因为一开始自己想用一段时间，找找 bug 然后修复一下。后面觉得很多功能和 Database 重叠了。
+
+而且数据库支持的种类太少，只支持 mysql，Oracle，pg。自己一个个适配又太麻烦，这个地方也是我最不满意的地方。
+
+还有数据库的连接，关闭项目后，再次打开，偶尔出现不会自动连接。
+
+然后就一直自己用，没有发布了。
+
+
+
+### AI 改造
+
+这几个月，AI 的发展可以说是一日万里，其实我也用 AI 开发了很多软件，桌面端，web，App 都有，后面会慢慢给大家分享。
+
+话说回来，其实我一直觉得，这个插件还是不错的，而且很有必要的，上面的一大串原因就不再赘述了。
+
+刚好 AI 这么厉害，为什么不重写一下这个插件呢？
+
+
+
+之前用了半年多，现在差不多三天就把主要的功能开发好了。
+
+
+
+
+
+
+
+
+
+
+
+
 
