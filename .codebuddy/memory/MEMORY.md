@@ -56,3 +56,15 @@
 - 必须共用 `KanbanCard.HEADER_HEIGHT(28)` / `ROW_HEIGHT(18)` / `PADDING(10)` 这套静态常量，算出 `height = HEADER_HEIGHT + 列数×ROW_HEIGHT + PADDING`
 - 教训：`KanbanBoard.TABLE_CARD_BASE_HEIGHT` 历史上写死成 60（= 28+10+22 多余空白），与 `drawTableCard` 实际公式 38 不对齐，导致 20 列的表底部留 ~22px 空白行
 - 详见 DEVELOPMENT_GUIDE 第 39 节 / memory/2026-08-20.md
+
+### 10. 借用 Database 插件原生 Action 实现"跳转"（2026-09-21 已实现并编译通过）
+- IDEA 的 ER 图（Diagrams）右键菜单里的 `Go To > Data / Go to DDL / Database Explorer` **不是自己写的跳转逻辑**，而是把现成 Action 组装成 ActionGroup（uml 框架 `DiagramSourceActionsGroup` + Database 的 `DbDiagramProvider$2$1.getChildren()` 用 `ActionManager.getAction(id)` 取）。
+- 可复用的 action id：`Jdbc.OpenEditor.Data`（Data/Edit Data）、`Jdbc.OpenEditor.DDL`（Go to DDL）、`sql.SelectInDatabaseView`（Database Explorer）、`FindUsages`、`$Copy`、`CopyReference`。
+- 它们只认 `CommonDataKeys.PSI_ELEMENT`，所以只需自建 `DataContext`：
+  `AnActionEvent.createFromDataContext(ActionPlaces.POPUP, action.getTemplatePresentation().clone(), SimpleDataContext.builder().add(CommonDataKeys.PROJECT, p).add(CommonDataKeys.PSI_ELEMENT, dbElement).build())` → `action.update(event)` 判 enable → `action.actionPerformed(event)`。
+- 解析 PSI 元素链路（反射）：`DbPsiFacade.getInstance(project)` → `findDataSource(name)` → `DasUtil.getTables(ds)` 匹配同名 → `DbPsiFacade.findElement(DasObject)` → `DbElement`（`extends PsiFileSystemItem`，即 PsiElement）。
+- **不要持久化 PSI 元素**（重启/同步后失效），右键时用 `TableInfo` 的 datasource+schema+tableName 现场重解析。
+- 两个坑：① 组 `DbDiagrams.SourceActionsGroup.GoTo` 继承 `DiagramSourceActionsGroup`，其 `update()` 要求 DataContext 有 `DiagramDataKeys.BUILDER` 且有选中节点，否则整组被禁用 → 必须自建 `DefaultActionGroup`；② `ActionPopupMenu.setDataContext(Supplier)` 在 2023.2 可用，`ActionPlaces` 无 `CONTEXT_MENU` 常量（用 `POPUP`）。
+- 已实现（2026-09-21）：`DatabaseTableMetadataFetcher.resolveDbElement`（反射 `DbPsiFacade.findElement(DasObject)`）+ 新类 `com.wd.db.TableNavigator.performAction/isActionAvailable` + `BoardContextMenu.buildHeaderMenu` 第 4 参 `NavigateAction`（生成「跳转」JMenu 子菜单）+ `KanbanBoard.navigateToTable`。`./gradlew compileJava` 通过。
+- **实测坑：`CommonDataKeys.PSI_ELEMENT_ARRAY` 在 2023.2 不存在**（首次编译报找不到符号），只能用 `PSI_ELEMENT`。
+- 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44 节

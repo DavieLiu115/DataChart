@@ -3,6 +3,7 @@ package com.wd.ui;
 import com.intellij.ui.JBColor;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableInfo;
+import com.wd.db.TableNavigator;
 import com.wd.model.RelationType;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -114,14 +115,33 @@ public final class BoardContextMenu {
 	}
 
 	/**
-	 * 创建表头右键菜单（复制表名 / 复制注释 / 同步表结构 / 删除表）。
+	 * 跳转动作回调。
+	 *
+	 * <p>把「点击了哪个跳转项」与「具体怎么跳」解耦：菜单只负责构建 UI 与传 actionId，
+	 * 实际执行由调用方委托给 {@link TableNavigator}（复用 Database 插件原生 Action）。</p>
+	 */
+	@FunctionalInterface
+	public interface NavigateAction {
+		/**
+		 * @param actionId Database 插件动作 id，取值见 {@link TableNavigator}
+		 * @return 是否执行成功
+		 */
+		boolean run(String actionId);
+	}
+
+	/**
+	 * 创建表头右键菜单（复制表名 / 复制注释 / 同步表结构 / 跳转 / 删除表）。
+	 *
+	 * <p>「跳转」子菜单复用 Database 插件自带动作（跳到 DDL / 查看数据 /
+	 * 在 Database Explorer 中定位），未安装 Database 插件时整组不显示。</p>
 	 *
 	 * @param info         表元信息
 	 * @param onSyncStructure 同步表结构回调（重新获取元信息并刷新卡片）；可为 null 表示不显示该项
 	 * @param onDeleteTable 删除表回调（效果等同 Command+Del：有连线先提示，无连线直接删除）；可为 null 表示不显示该项
+	 * @param navigateAction 跳转回调；可为 null 表示不显示「跳转」子菜单
 	 */
 	public static JPopupMenu buildHeaderMenu(TableInfo info, Runnable onSyncStructure,
-			Runnable onDeleteTable) {
+			Runnable onDeleteTable, NavigateAction navigateAction) {
 		if (info == null) {
 			return null;
 		}
@@ -144,6 +164,12 @@ public final class BoardContextMenu {
 			menu.add(syncItem);
 		}
 
+		JMenu gotoMenu = buildNavigateMenu(navigateAction);
+		if (gotoMenu != null) {
+			menu.addSeparator();
+			menu.add(gotoMenu);
+		}
+
 		if (onDeleteTable != null) {
 			menu.addSeparator();
 			JMenuItem deleteItem = buildStyledMenuItem("删除表");
@@ -155,6 +181,52 @@ public final class BoardContextMenu {
 		}
 
 		return menu;
+	}
+
+	/**
+	 * 创建「跳转」子菜单（复用 Database 插件原生动作：跳到 DDL / 查看数据 /
+	 * 在 Database Explorer 中定位）。
+	 *
+	 * <p>未安装 / 未启用 Database 插件（动作取不到）时返回 null，调用方不显示该子菜单。</p>
+	 */
+	private static JMenu buildNavigateMenu(NavigateAction navigateAction) {
+		if (navigateAction == null) {
+			return null;
+		}
+		boolean hasDdl = TableNavigator.isActionAvailable(TableNavigator.ACTION_OPEN_DDL);
+		boolean hasData = TableNavigator.isActionAvailable(TableNavigator.ACTION_OPEN_DATA);
+		boolean hasExplorer = TableNavigator.isActionAvailable(TableNavigator.ACTION_SELECT_IN_DATABASE_VIEW);
+		if (!hasDdl && !hasData && !hasExplorer) {
+			return null;
+		}
+
+		// 与「关系类型」子菜单保持一致的样式（否则 hover 会白字看不清）
+		JMenu gotoMenu = new JMenu("跳转");
+		gotoMenu.setForeground(JBColor.foreground());
+		gotoMenu.setBackground(JBColor.background());
+		gotoMenu.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
+		gotoMenu.putClientProperty("MenuItem.selectionBackground", JBColor.background());
+
+		if (hasDdl) {
+			gotoMenu.add(buildNavigateItem("跳到 DDL", TableNavigator.ACTION_OPEN_DDL, navigateAction));
+		}
+		if (hasData) {
+			gotoMenu.add(buildNavigateItem("查看数据", TableNavigator.ACTION_OPEN_DATA, navigateAction));
+		}
+		if (hasExplorer) {
+			gotoMenu.add(buildNavigateItem("在 Database Explorer 中定位",
+					TableNavigator.ACTION_SELECT_IN_DATABASE_VIEW, navigateAction));
+		}
+		return gotoMenu;
+	}
+
+	/**
+	 * 创建一个跳转菜单项：点击后把 actionId 交给调用方执行。
+	 */
+	private static JMenuItem buildNavigateItem(String label, String actionId, NavigateAction navigateAction) {
+		JMenuItem item = buildStyledMenuItem(label);
+		item.addActionListener(e -> navigateAction.run(actionId));
+		return item;
 	}
 
 	/**

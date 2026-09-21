@@ -875,3 +875,75 @@ y = boardPoint.getY();
 - **BASE_HEIGHT 与 drawTableCard 公式必须严格对齐**：否则底部会留多余空白（38 ≠ 60 是隐藏陷阱）
 - 若后续要控制遮挡，建议在"卡片内滚动"或"折叠双栏"方案上做，不要回到全局 400 截断
 
+### 44. 表头右键「跳转」：复用 Database 插件原生 Action（2026-09-21）
+
+#### 需求
+表头右键菜单增加跳转项（对齐 IDEA 数据库 ER 图里的 `Go To > Data / Go to DDL / Database Explorer`）。
+
+#### 背景：IDEA Diagrams 是怎么做的（反编译 ideaIU-2023.2.6 得到）
+图右键菜单**不是自己写的跳转逻辑**，而是「把自己的选中元素包成 PSI 上下文 + 组装现成 Action」：
+- `com.intellij.uml.core.actions.DiagramSourceActionsGroup`（`plugins/uml/lib/uml-support.jar`）是基类；
+  Database 侧 `com.intellij.database.diagram.DbDiagramProvider$2$1.getChildren()` 用
+  `ActionManager.getInstance().getAction(id)` 取 `$Copy` / `CopyReference` / `FindUsages` / `DbDiagrams.SourceActionsGroup.GoTo` 等组装。
+- `Go To` 子菜单定义在 `database-plugin.jar!/META-INF/DatabasePlugin.xml`：
+  ```xml
+  <group id="DbDiagrams.SourceActionsGroup.GoTo" popup="true">
+    <reference ref="Jdbc.OpenEditor.Data"/>       <!-- Data -->
+    <reference ref="Jdbc.OpenEditor.DDL"/>        <!-- Go to DDL -->
+    <reference ref="sql.SelectInDatabaseView"/>   <!-- Database Explorer -->
+  </group>
+  ```
+- 通用 Action 只认 `CommonDataKeys.PSI_ELEMENT`；`UmlFileEditorImpl implements DataProvider`，
+  在 `getData()` 里把 `DiagramNode`（`PsiDiagramNode` 持 `SmartPsiElementPointer<PsiElement>`）映射成 PSI 元素。
+
+#### 本插件实现（三处改动 + 一个新类）
+1. **`DatabaseTableMetadataFetcher.resolveDbElement(project, datasourceName, tableName)`**（新增）
+   按需把持久化信息解析回 PSI 元素（反射链）：
+   ```
+   DbPsiFacade.getInstance(project) → findDataSource(name) → DasUtil.getTables(ds) 匹配同名表
+     → DbPsiFacade.findElement(DasObject) → DbElement（extends PsiFileSystemItem，即 PsiElement）
+   ```
+   用 `dbPsiFacadeClass.getMethod("findElement", dasObjectClass)` **精确签名**查找（按名查找会命中重载踩空）。
+2. **`com.wd.db.TableNavigator`**（新增，纯静态）：
+   - 常量 action id：`Jdbc.OpenEditor.Data` / `Jdbc.OpenEditor.DDL` / `sql.SelectInDatabaseView` / `FindUsages`
+   - `isActionAvailable(actionId)`：`ActionManager.getAction() != null`（未装 Database 插件时为 false）
+   - `performAction(project, info, actionId)`：解析 PSI → 构造 `DataContext` → `action.update()` 判 enable → `actionPerformed()`
+3. **`BoardContextMenu.buildHeaderMenu(...)`** 增加第 4 个参数 `NavigateAction navigateAction`，
+   生成「跳转」子菜单（`JMenu`，样式与「关系类型」子菜单一致：前景色 + `MenuItem.selectionForeground/Background` 两个 client property）。
+   动作不存在时整组不显示。
+4. **`KanbanBoard.showHeaderContextMenu`** 传入 `actionId -> navigateToTable(card, actionId)`；
+   `navigateToTable` 失败时用 `NotificationUtil.info` 提示"请先在 Database 工具窗口中刷新"。
+
+#### 可用 API（已在 2023.2.6 核对）
+```java
+DataContext ctx = SimpleDataContext.builder()
+        .add(CommonDataKeys.PROJECT, project)
+        .add(CommonDataKeys.PSI_ELEMENT, psiElement)
+        .build();
+
+AnActionEvent event = AnActionEvent.createFromDataContext(
+        ActionPlaces.POPUP, action.getTemplatePresentation().clone(), ctx);
+
+Boolean enabled = ReadAction.compute(() -> { action.update(event); return event.getPresentation().isEnabled(); });
+if (enabled) action.actionPerformed(event);   // actionPerformed 放在 read action 外面
+```
+
+#### 踩坑
+- **`CommonDataKeys.PSI_ELEMENT_ARRAY` 在 2023.2 不存在**（`CommonDataKeys` 只有 `PSI_ELEMENT`/`PSI_FILE`）→ 别加，编译直接报"找不到符号"。
+- **不要直接复用 `DbDiagrams.SourceActionsGroup.GoTo` 这个组**：它继承 `DiagramSourceActionsGroup`，
+  `update()` 要求 DataContext 里有 `DiagramDataKeys.BUILDER` 且 `DiagramSelectionService.getSingleSelectedNode(builder) != null`，
+  否则整组 `setEnabledAndVisible(false)`，在画板里会整组置灰 → 必须自建菜单项。
+- **`ActionPlaces` 在 2023.2 没有 `CONTEXT_MENU` 常量**，用 `ActionPlaces.POPUP`。
+- **`ActionManager.createActionPopupMenu(place, group)` 没有带 component 的重载**（2023.2）；
+  若要动态菜单用 `ActionPopupMenu.setDataContext(Supplier<? extends DataContext>)`（2023.2 已有），
+  但它产出的 `JPopupMenu` 走 Swing 默认 L&F，hover 会白字 → 与现有自绘菜单风格不一致，所以本次仍用自建 `JMenuItem`。
+- **文案由 Action 自己按 place 切换**：`OpenEditorAction$OpenDataAction.update()` 里
+  `"EditorPopup".equals(place) ? "action.Jdbc.OpenEditor.Data.text"("Edit Data") : "...Data.GoTo.text"("Data")`；
+  本插件自定了中文文案，不受影响。
+
+#### 设计原则
+- **跳转逻辑不要自己造**：能复用宿主插件（Database）的原生 Action 就复用，行为和用户预期一致（DDL、数据编辑器、Database 工具窗口定位都由对方维护）。
+- **PSI 元素不持久化**：`.datachart` 只存 datasource + schema + tableName，右键时现场重新解析 —— 天然兼容旧文件、IDE 重启、数据源同步后元素失效。
+- **PSI / DAS 访问必须在 ReadAction 中**：解析元素与 `action.update()` 都包 `ReadAction.compute`，`actionPerformed` 放外面（可能触发写操作或弹窗）。
+- **可选依赖的动作要先判存在**：`ActionManager.getAction(id) == null` 表示未装 Database 插件，菜单项直接不显示。
+

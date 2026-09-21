@@ -223,6 +223,63 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 		}
 	}
 
+	/**
+	 * 按「数据源 + 表名」解析 Database 插件的 PSI 元素（{@code DbElement}）。
+	 *
+	 * <p>用途：复用 Database 插件自带的原生动作（Go to DDL / Edit Data /
+	 * Select in Database Explorer 等）。这些动作只认 {@code CommonDataKeys.PSI_ELEMENT}，
+	 * 而 {@code .datachart} 中只持久化了 datasource + schema + tableName，
+	 * 因此需要在右键时现场把表名解析回 PSI 元素。</p>
+	 *
+	 * <p>解析链路（全部反射）：</p>
+	 * <ol>
+	 *   <li>{@code DbPsiFacade.getInstance(project)}</li>
+	 *   <li>{@code DbPsiFacade.findDataSource(name)} → {@code DbDataSource}</li>
+	 *   <li>{@code DasUtil.getTables(ds)} → 匹配同名表（{@code DasObject}）</li>
+	 *   <li>{@code DbPsiFacade.findElement(DasObject)} → {@code DbElement}（PSI 元素）</li>
+	 * </ol>
+	 *
+	 * <p><b>调用方必须在 {@link com.intellij.openapi.application.ReadAction} 中执行</b>
+	 * （涉及 PSI / DAS 访问）。返回的元素不要长期持有：数据源同步 / IDE 重启后会失效，
+	 * 每次都重新解析即可。</p>
+	 *
+	 * @param project        当前工程
+	 * @param datasourceName 数据源显示名
+	 * @param tableName      表名
+	 * @return {@code DbElement}（同时是 {@code PsiElement}），解析失败返回 null
+	 */
+	public Object resolveDbElement(Project project, String datasourceName, String tableName) {
+		if (!isAvailable() || project == null || tableName == null || tableName.isEmpty()) {
+			return null;
+		}
+		try {
+			Object facade = invokeStatic(dbPsiFacadeClass, "getInstance", Project.class, project);
+			if (facade == null) {
+				return null;
+			}
+			Object dataSource = findDataSource(facade, datasourceName);
+			if (dataSource == null) {
+				LOG.warn("resolveDbElement: 未找到数据源 " + datasourceName + "（表 " + tableName + "）");
+				return null;
+			}
+			Object table = findTable(dataSource, tableName);
+			if (table == null) {
+				LOG.warn("resolveDbElement: 数据源 " + datasourceName + " 中未找到表 " + tableName);
+				return null;
+			}
+			// 精确签名查找：DbPsiFacade.findElement(DasObject) → DbElement
+			Method findElement = dbPsiFacadeClass.getMethod("findElement", dasObjectClass);
+			Object element = invokeMethod(findElement, facade, table);
+			if (element == null) {
+				LOG.warn("resolveDbElement: findElement 返回 null，表 " + tableName);
+			}
+			return element;
+		} catch (Exception e) {
+			LOG.warn("resolveDbElement failed for table: " + tableName, e);
+			return null;
+		}
+	}
+
 	// ========== 反射工具方法 ==========
 
 	/**

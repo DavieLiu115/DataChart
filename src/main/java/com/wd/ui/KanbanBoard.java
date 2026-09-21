@@ -1674,7 +1674,7 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 表头右键菜单（复制表名 / 复制注释 / 同步表结构 / 删除表）。
+	 * 表头右键菜单（复制表名 / 复制注释 / 同步表结构 / 跳转 / 删除表）。
 	 */
 	private void showHeaderContextMenu(KanbanCard card, java.awt.Point screenPoint) {
 		if (card == null) {
@@ -1683,10 +1683,36 @@ public class KanbanBoard extends JPanel {
 		javax.swing.JPopupMenu menu = BoardContextMenu.buildHeaderMenu(
 				card.getTableInfo(),
 				() -> syncTableStructure(card),
-				() -> deleteCard(card));
+				() -> deleteCard(card),
+				actionId -> navigateToTable(card, actionId));
 		if (menu != null) {
 			menu.show(this, screenPoint.x, screenPoint.y);
 		}
+	}
+
+	/**
+	 * 表头右键「跳转」：复用 Database 插件原生动作（跳到 DDL / 查看数据 /
+	 * 在 Database Explorer 中定位）。
+	 *
+	 * <p>跳转目标不缓存 PSI 元素，而是用卡片上持久化的「数据源 + 表名」现场重新解析，
+	 * 因此旧 {@code .datachart} 文件与 IDE 重启后同样可用。</p>
+	 *
+	 * @param card     目标卡片
+	 * @param actionId Database 插件动作 id（见 {@link com.wd.db.TableNavigator}）
+	 * @return 是否执行成功
+	 */
+	private boolean navigateToTable(KanbanCard card, String actionId) {
+		TableInfo info = card == null ? null : card.getTableInfo();
+		if (info == null) {
+			return false;
+		}
+		boolean ok = com.wd.db.TableNavigator.performAction(project, info, actionId);
+		if (!ok) {
+			NotificationUtil.info("跳转失败",
+					"未找到表 " + info.getName() + "（数据源：" + info.getDatasourceName()
+							+ "），请先在 Database 工具窗口中刷新后重试");
+		}
+		return ok;
 	}
 
 	/**
