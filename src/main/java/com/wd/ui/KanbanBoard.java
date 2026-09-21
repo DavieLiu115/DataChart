@@ -1707,7 +1707,7 @@ public class KanbanBoard extends JPanel {
 			return false;
 		}
 		com.wd.db.TableNavigator.Result result =
-				com.wd.db.TableNavigator.performAction(project, info, actionId);
+				com.wd.db.TableNavigator.performAction(project, info, actionId, this);
 		if (!result.isSuccess()) {
 			NotificationUtil.info("跳转失败", result.getMessage());
 		}

@@ -11,7 +11,11 @@ import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.psi.PsiElement;
+import com.intellij.usages.UsageTarget;
+import com.intellij.usages.UsageView;
+import java.awt.Component;
 import java.lang.reflect.Method;
 import org.jetbrains.annotations.Nullable;
 
@@ -120,13 +124,24 @@ public final class TableNavigator {
 	 */
 	public static Result performAction(@Nullable Project project,
 			@Nullable TableInfo info, @Nullable String actionId) {
+		return performAction(project, info, actionId, null);
+	}
+
+	/**
+	 * 对指定表执行跳转（带父组件，用于弹窗 / 对话框定位）。
+	 *
+	 * @param contextComponent 作为 {@code PlatformCoreDataKeys.CONTEXT_COMPONENT} 注入，
+	 *                         让 {@code FindUsages} 之类的弹窗能相对该组件定位；可为 null
+	 */
+	public static Result performAction(@Nullable Project project, @Nullable TableInfo info,
+			@Nullable String actionId, @Nullable Component contextComponent) {
 		if (project == null || project.isDisposed() || info == null || actionId == null) {
 			return Result.fail("跳转参数无效");
 		}
 		if (ACTION_SELECT_IN_DATABASE_VIEW.equals(actionId)) {
 			return selectInDatabaseView(project, info);
 		}
-		return performDatabaseAction(project, info, actionId);
+		return performDatabaseAction(project, info, actionId, contextComponent);
 	}
 
 	/**
@@ -165,7 +180,8 @@ public final class TableNavigator {
 	/**
 	 * 通过 Database 插件的原生 Action 执行跳转（Data / DDL / FindUsages 等）。
 	 */
-	private static Result performDatabaseAction(Project project, TableInfo info, String actionId) {
+	private static Result performDatabaseAction(Project project, TableInfo info,
+			String actionId, @Nullable Component contextComponent) {
 		AnAction action = ActionManager.getInstance().getAction(actionId);
 		if (action == null) {
 			return Result.fail("IDE 中没有启用 Database 插件，无法执行该跳转");
@@ -175,11 +191,30 @@ public final class TableNavigator {
 			return Result.fail(notFoundMessage(info));
 		}
 
-		DataContext dataContext = SimpleDataContext.builder()
+		SimpleDataContext.Builder builder = SimpleDataContext.builder()
 				.add(CommonDataKeys.PROJECT, project)
 				.add(CommonDataKeys.PSI_ELEMENT, element)
-				.add(PlatformCoreDataKeys.PSI_ELEMENT_ARRAY, new PsiElement[]{element})
-				.build();
+				.add(PlatformCoreDataKeys.PSI_ELEMENT_ARRAY, new PsiElement[]{element});
+		if (contextComponent != null) {
+			builder.add(PlatformCoreDataKeys.CONTEXT_COMPONENT, contextComponent);
+		}
+		if (ACTION_FIND_USAGES.equals(actionId)) {
+			// 2024.1 起 FindUsagesAction 只认 UsageView.USAGE_TARGETS_KEY（或 FindUsagesAction.SEARCH_TARGETS，
+			// 或编辑器光标位置），**不读 CommonDataKeys.PSI_ELEMENT**。
+			// 只给 PSI 元素的话 update() 判定为不可用，菜单项会因 place 是 popup 而被直接隐藏。
+			// 这里补一个 UsageTarget，让动作走「单目标」分支直接查找（等价 Alt+F7）。
+			try {
+				// 注意：单参构造器在 2024.1 已 @Deprecated(forRemoval=true)，用 (element, update=true) 等价替代
+				UsageTarget[] usageTargets = ReadAction.compute(() ->
+						new UsageTarget[]{new PsiElement2UsageTargetAdapter(element, true)});
+				builder.add(UsageView.USAGE_TARGETS_KEY, usageTargets);
+			} catch (Exception e) {
+				LOG.warn("构造 FindUsages UsageTarget 失败: " + info.getName(), e);
+				return Result.fail("无法为表 " + info.getName()
+						+ " 构造查找目标，详细原因见 idea.log（搜索 TableNavigator）");
+			}
+		}
+		DataContext dataContext = builder.build();
 
 		AnActionEvent event = AnActionEvent.createFromDataContext(
 				ActionPlaces.POPUP, action.getTemplatePresentation().clone(), dataContext);
@@ -200,7 +235,12 @@ public final class TableNavigator {
 			LOG.warn("跳转动作在当前上下文被置灰: " + actionId + ", place=" + ActionPlaces.POPUP);
 			return Result.fail("该跳转在当前上下文不可用（" + actionId + "）");
 		}
-		action.actionPerformed(event);
+		try {
+			action.actionPerformed(event);
+		} catch (Exception e) {
+			LOG.warn("跳转动作执行异常: " + actionId, e);
+			return Result.fail("跳转失败（" + actionId + "），详细原因见 idea.log");
+		}
 		return Result.ok();
 	}
 

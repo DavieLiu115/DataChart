@@ -1011,3 +1011,80 @@ m.invoke(null, element, Boolean.TRUE);
   写成 `CommonDataKeys.PSI_ELEMENT_ARRAY` 会编译报"找不到符号"。
 - **诊断优先于猜测**：失败提示不要一句话盖所有分支，返回带原因的 `Result` 并打日志，一次点击就能定位问题环节。
 
+### 45. 表头右键「查找用法」：Find Usages 在非编辑器组件里的正确接入（2026-09-21）
+
+#### 需求
+表头右键加「查找用法」，点击弹出 Find 结果窗口（等价 IDEA 图上 `Find Usages ⌥F7`）。
+注意：图右键菜单里的 `Find Usages` 就是平台通用动作 id `FindUsages`，Database 插件并没有自己的实现。
+
+#### 关键结论：2024.1 的 `FindUsagesAction` **不读 `CommonDataKeys.PSI_ELEMENT`**
+反编译 `com.intellij.find.actions.FindUsagesAction` + `FindUsagesInFileAction`（app-client.jar）：
+
+```java
+// update()
+boolean enabled = isEnabled(ctx);
+presentation.setVisible(enabled || !ActionPlaces.isPopupPlace(place));  // ⚠️ popup 下不可用会被"隐藏"
+presentation.setEnabled(enabled);
+
+// isEnabled(ctx)
+project != null
+  && ctx.getData(EditorGutter.KEY) == null
+  && !Boolean.TRUE.equals(ctx.getData(CommonDataKeys.EDITOR_VIRTUAL_SPACE))
+  && (canFindUsages(project, ctx) || !ResolverKt.allTargets(ctx).isEmpty());
+
+// canFindUsages(project, ctx) → 第一行就是 editor == null ? false
+// allTargets(ctx) → SearchTargetVariantsDataRuleKt.targetVariants(ctx)，只认三样：
+//   1) FindUsagesAction.SEARCH_TARGETS（新 API，Collection<SearchTarget>）
+//   2) UsageView.USAGE_TARGETS_KEY（UsageTarget[]）
+//   3) 有 EDITOR 时：TargetElementUtil.findReference(editor, caretOffset) 取光标处引用
+```
+
+即：**只往 DataContext 里塞 PSI 元素是没用的** —— 动作判定不可用，而且因为 place 是 popup，
+`setVisible(false)` 会把它**直接隐藏**（连置灰都看不到）。
+
+`actionPerformed` 的分支（交给 `ResolverKt.findShowUsages` 处理）：
+- 目标数 = 1 → `target.handle(handler)` **直接查找**（等价 Alt+F7，正是我们要的）
+- 目标数 > 1 → 弹 `TargetPopup` 让用户选
+- 目标数 = 0 → 错误提示
+
+#### 实现（`TableNavigator.performDatabaseAction`）
+对 `ACTION_FIND_USAGES` 额外补一个 `UsageTarget`：
+
+```java
+SimpleDataContext.Builder builder = SimpleDataContext.builder()
+        .add(CommonDataKeys.PROJECT, project)
+        .add(CommonDataKeys.PSI_ELEMENT, element)
+        .add(PlatformCoreDataKeys.PSI_ELEMENT_ARRAY, new PsiElement[]{element})
+        .add(PlatformCoreDataKeys.CONTEXT_COMPONENT, boardComponent);   // 弹窗定位锚点
+
+if (ACTION_FIND_USAGES.equals(actionId)) {
+    UsageTarget[] targets = ReadAction.compute(() ->
+            new UsageTarget[]{ new PsiElement2UsageTargetAdapter(element, true) });  // 必须 ReadAction
+    builder.add(UsageView.USAGE_TARGETS_KEY, targets);
+}
+// 之后照常 action.update(event) → action.actionPerformed(event)
+```
+
+执行链：`FindUsagesAction` → `PsiTargetVariant.handle(...)` → `startFindUsages(element)`（legacy 路径）
+→ `FindUsagesManager` → Database 插件注册的 `findUsagesHandlerFactory`
+（`com.intellij.database.psi.DbFindUsagesHandlerFactory`）→ 结果落在 Find 工具窗口，
+SQL / XML 里引用该表名的位置都会被搜出来。
+
+`CONTEXT_COMPONENT` 由 `KanbanBoard.navigateToTable` 传 `this`：`actionPerformed` 会调
+`JBPopupFactory.guessBestPopupLocation(ctx)`，没有锚点组件时弹窗定位不可靠。
+
+#### 菜单
+- 「查找用法」放**顶层**（与 IDEA 图右键菜单一致：Find Usages 在 Go To 之前），
+  「跳转」子菜单紧随其后，两者共用同一个 `NavigateAction` 回调，只是 actionId 不同。
+- 菜单项右侧显示快捷键提示：`ActionManager.getKeyboardShortcut(id)` → `JMenuItem.setAccelerator(...)`。
+  弹窗菜单不会注册全局快捷键，这里**仅作展示**。
+
+#### 踩坑
+- **`PsiElement2UsageTargetAdapter(PsiElement)` 在 2024.1 已 `@Deprecated(forRemoval=true)`**，编译会报
+  "已过时, 且标记为待删除"；改用 `PsiElement2UsageTargetAdapter(element, boolean update)`（内部
+  `new FindUsagesOptions(project)` + update 标志），语义等价。
+- **popup place 下不可用的动作是"隐藏"而不是"置灰"**：`setVisible(enabled || !ActionPlaces.isPopupPlace(place))`。
+  所以"菜单项不见了"要先怀疑动作自己判定不可用，而不是没注册。
+- **`UsageTarget` 必须在 ReadAction 里构造**（内部是 `SmartPsiElementPointer`）。
+- 用 `ActionPlaces.POPUP` 时 `FindUsagesAction` 的文案/可见性逻辑才符合预期。
+

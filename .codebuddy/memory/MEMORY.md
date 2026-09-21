@@ -77,4 +77,7 @@
 - **实测坑（selector 类 Action 不可用）**：`sql.SelectInDatabaseView` 的 `update()` 要求 `SelectInContext.getVirtualFile()` 是 Database 文件系统虚拟文件（`DbImplUtil.isDatabaseVirtualFile`），合成 `AnActionEvent` 必然被置灰 → 改为**直连反射调用 `com.intellij.database.view.DatabaseView.select(PsiElement, boolean)`**（静态方法，public），绕开 `SelectInContext`/`canSelect`。
 - `resolveDbElement` 三级兜底：数据源松散匹配（忽略大小写/`@host`）→ `DbDataSource.getNameIndex().getObjectsByNameInsensitive` 查表 → `DbDataSource.findElement(DasObject)`/`DbPsiFacade.findElement`（**必须精确签名**，`DbDataSource` 还有 `findElement(ObjectPath)` 重载）。
 - 全部反射目标已在 build 241 上复核；`performAction` 返回带原因的 `Result` 便于定位失败环节。
-- 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44 节
+- **「查找用法」= 平台 `FindUsages` 动作**（Database 插件无自己的实现）。2024.1 的 `FindUsagesAction` **只认 `UsageView.USAGE_TARGETS_KEY` / `FindUsagesAction.SEARCH_TARGETS` / 编辑器光标，不读 `PSI_ELEMENT`** → 必须补
+  `UsageView.USAGE_TARGETS_KEY = { new PsiElement2UsageTargetAdapter(element, true) }`（`ReadAction` 中构造；单参构造器在 241 已 forRemoval 弃用）+ `CONTEXT_COMPONENT` 作为弹窗锚点。恰好 1 个目标时才会直接查找（等价 Alt+F7）。
+- **popup place 下不可用的动作是"隐藏"而非"置灰"**（`FindUsagesInFileAction.updateFindUsagesAction` 里 `setVisible(enabled || !isPopupPlace(place))`）。
+- 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
