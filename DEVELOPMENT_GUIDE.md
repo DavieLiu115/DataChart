@@ -1076,8 +1076,10 @@ SQL / XML 里引用该表名的位置都会被搜出来。
 #### 菜单
 - 「查找用法」放**顶层**（与 IDEA 图右键菜单一致：Find Usages 在 Go To 之前），
   「跳转」子菜单紧随其后，两者共用同一个 `NavigateAction` 回调，只是 actionId 不同。
-- 菜单项右侧显示快捷键提示：`ActionManager.getKeyboardShortcut(id)` → `JMenuItem.setAccelerator(...)`。
-  弹窗菜单不会注册全局快捷键，这里**仅作展示**。
+- **不要在菜单项上显示快捷键提示**（2026-09-21 用户反馈后去掉）：曾用
+  `ActionManager.getKeyboardShortcut(id)` + `JMenuItem.setAccelerator(...)` 在菜单项右侧显示
+  ⌥F7 / ⌘B / F4 等提示，但这些键位在画板里**并不生效**（弹窗菜单只负责展示，不注册全局快捷键），
+  显示出来反而误导用户。等真正注册了快捷键（`KanbanBoard` 的 `registerKeyboardAction`）再加提示。
 
 #### 踩坑
 - **`PsiElement2UsageTargetAdapter(PsiElement)` 在 2024.1 已 `@Deprecated(forRemoval=true)`**，编译会报

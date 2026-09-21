@@ -1,7 +1,5 @@
 package com.wd.ui;
 
-import com.intellij.openapi.actionSystem.ActionManager;
-import com.intellij.openapi.actionSystem.KeyboardShortcut;
 import com.intellij.ui.JBColor;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableInfo;
@@ -174,7 +172,6 @@ public final class BoardContextMenu {
 		}
 		if (hasFindUsages) {
 			JMenuItem findUsagesItem = buildStyledMenuItem("查找用法");
-			applyActionAccelerator(findUsagesItem, TableNavigator.ACTION_FIND_USAGES);
 			findUsagesItem.addActionListener(e -> navigateAction.run(TableNavigator.ACTION_FIND_USAGES));
 			menu.add(findUsagesItem);
 		}
@@ -237,25 +234,8 @@ public final class BoardContextMenu {
 	 */
 	private static JMenuItem buildNavigateItem(String label, String actionId, NavigateAction navigateAction) {
 		JMenuItem item = buildStyledMenuItem(label);
-		applyActionAccelerator(item, actionId);
 		item.addActionListener(e -> navigateAction.run(actionId));
 		return item;
-	}
-
-	/**
-	 * 给菜单项显示动作当前键位映射的快捷键（与 IDEA「Find Usages ⌥F7」的展示一致）。
-	 *
-	 * <p>弹窗菜单不会全局注册快捷键，这里只做展示；键位取不到时静默跳过，不影响功能。</p>
-	 */
-	private static void applyActionAccelerator(JMenuItem item, String actionId) {
-		try {
-			KeyboardShortcut shortcut = ActionManager.getInstance().getKeyboardShortcut(actionId);
-			if (shortcut != null && shortcut.getFirstKeyStroke() != null) {
-				item.setAccelerator(shortcut.getFirstKeyStroke());
-			}
-		} catch (Exception ignored) {
-			// 忽略：仅影响快捷键提示的展示
-		}
 	}
 
 	/**

@@ -80,4 +80,5 @@
 - **「查找用法」= 平台 `FindUsages` 动作**（Database 插件无自己的实现）。2024.1 的 `FindUsagesAction` **只认 `UsageView.USAGE_TARGETS_KEY` / `FindUsagesAction.SEARCH_TARGETS` / 编辑器光标，不读 `PSI_ELEMENT`** → 必须补
   `UsageView.USAGE_TARGETS_KEY = { new PsiElement2UsageTargetAdapter(element, true) }`（`ReadAction` 中构造；单参构造器在 241 已 forRemoval 弃用）+ `CONTEXT_COMPONENT` 作为弹窗锚点。恰好 1 个目标时才会直接查找（等价 Alt+F7）。
 - **popup place 下不可用的动作是"隐藏"而非"置灰"**（`FindUsagesInFileAction.updateFindUsagesAction` 里 `setVisible(enabled || !isPopupPlace(place))`）。
+- **菜单项不要显示快捷键提示**（2026-09-21 用户要求去掉）：`JMenuItem.setAccelerator` 在弹窗菜单里只展示不生效，会误导用户；等真用 `registerKeyboardAction` 注册后再加。
 - 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
