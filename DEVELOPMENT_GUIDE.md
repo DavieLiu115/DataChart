@@ -947,3 +947,67 @@ if (enabled) action.actionPerformed(event);   // actionPerformed 放在 read act
 - **PSI / DAS 访问必须在 ReadAction 中**：解析元素与 `action.update()` 都包 `ReadAction.compute`，`actionPerformed` 放外面（可能触发写操作或弹窗）。
 - **可选依赖的动作要先判存在**：`ActionManager.getAction(id) == null` 表示未装 Database 插件，菜单项直接不显示。
 
+#### 二次修复：「在 Database Explorer 中定位」报「未找到表」（2026-09-21）
+#### 现象
+点「跳转 → 在 Database Explorer 中定位」提示"未找到表 xxx（数据源：yyy@localhost）"。
+（注意：该提示是 `TableNavigator` 的统一失败文案，**不代表一定卡在表名解析**。）
+
+#### 根因 1：`sql.SelectInDatabaseView` 用合成 AnActionEvent 会被静默置灰
+反编译 `SelectInDatabaseViewAction.update()` 的调用链：
+```
+update() → SelectInContextImpl.createContext(event)
+         → new SelectInDatabaseView().canSelect(ctx, isStrict(dataContext))
+         → presentation.setEnabledAndVisible(canSelect)
+canSelect(ctx, strict) = !ctx.getVirtualFile().isDirectory() && askProvidersInner(ctx, strict) != null
+askProvidersInner  = 遍历 com.intellij.database.selectInProvider 扩展的 findTarget(ctx, strict)
+DbElementSelectInProvider.findTarget(ctx, strict):
+     VirtualFile vf = ctx.getVirtualFile();
+     if (!DbImplUtil.isDatabaseVirtualFile(vf)) return null;   // ← 关键
+```
+也就是说：**必须让 `SelectInContext.getVirtualFile()` 是 Database 文件系统里的虚拟文件**，否则 Provider 直接返回 null → `canSelect` false → 动作被置灰。
+用 `AnActionEvent.createFromDataContext(...)` 合成的上下文（无 VIRTUAL_FILE / 无 CONTEXT_COMPONENT）根本构造不出这种 ctx，所以这条 action 路径走不通。
+
+#### 修复 1：改走「直连」，调用该 Action 最终执行的那一步
+`DatabaseView.select(PsiElement, boolean)` 是 Database 插件的 **public static** 方法，也是 `SelectInDatabaseView.selectIn` 内部真正干的活：
+```java
+// com.intellij.database.view.DatabaseView
+public static Promise<Void> select(PsiElement element, boolean focus);
+```
+因此 `TableNavigator` 对 `ACTION_SELECT_IN_DATABASE_VIEW` **不再走 Action**，而是反射直接调用它，
+完全绕开 `SelectInContext` / `canSelect` / `askProvidersInner` 的限制：
+```java
+Class<?> cls = Class.forName("com.intellij.database.view.DatabaseView");
+Method m = cls.getMethod("select", PsiElement.class, boolean.class);   // 懒加载 + 缓存
+m.invoke(null, element, Boolean.TRUE);
+```
+相应地 `isActionAvailable(ACTION_SELECT_IN_DATABASE_VIEW)` 改为判断 `DatabaseView.select` 是否可取到。
+
+#### 修复 2：解析链路加三级兜底 + 失败日志
+`DatabaseTableMetadataFetcher.resolveDbElement` 重写（每步都有回退）：
+1. 数据源：`DbPsiFacade.findDataSource(name)` → 失败再 `findDataSourceLoosely`（忽略大小写、忽略/补齐 `@host` 后缀、工程内唯一数据源直接用）
+2. 表：优先 `DbDataSource.getNameIndex().getObjectsByNameInsensitive(tableName)` 过滤 `DasTable`
+   （**名称索引不依赖 introspection level、不受 schema 限定影响**，比 `DasUtil.getTables` 遍历更可靠）→ 回退 `DasUtil.getTables`
+3. 元素：`DbDataSource.findElement(DasObject)` → 回退 `DbPsiFacade.findElement(DasObject)`；
+   **必须用 `getMethod("findElement", DasObject.class)` 精确签名**（`DbDataSource` 上还有 `findElement(ObjectPath)` 重载）
+4. 失败时 `LOG.warn` 打印**当前可用数据源列表**，排查"数据源改名/表被删/introspection 未完成"一眼可见
+
+#### 修复 3：失败提示带上可操作信息
+`TableNavigator.performAction` 改为返回 `Result`（成功/失败 + 原因），`KanbanBoard.navigateToTable` 直接把原因弹给用户，
+不再统一说"未找到表"。
+
+#### 环境变更（重要）
+`build.gradle.kts` 的 `intellij.localPath` 已从下载版 `ideaIU-2023.2.6` 改为**本机安装版**
+`/Applications/IntelliJ IDEA.app/Contents`（= IDEA 2024.1.6，build 241）。
+本节涉及的全部反射目标已在 241 上重新核对通过：
+`DatabaseView.select(PsiElement, boolean)`、`DbPsiFacade.{getDataSources,findDataSource,findElement}`、
+`DbDataSource.{getNameIndex,findElement(DasObject)}`、`ModelNameIndex.getObjectsByNameInsensitive(String)`、
+`DbElement extends PsiFileSystemItem`。
+
+#### 新增踩坑
+- **合成 `AnActionEvent` 不是万能的**：依赖 `SelectInContext`/`CONTEXT_COMPONENT`/`VIRTUAL_FILE` 的 Action（典型是各种 Select In / 定位类动作）
+  在合成上下文里会被置灰或抛异常。遇到这种情况，去反编译该 Action 的 `update()/actionPerformed()`，
+  找到它最终调用的**静态入口方法**直接调用，比硬凑 DataContext 稳。
+- **`PSI_ELEMENT_ARRAY` 的正确归属**：`PlatformCoreDataKeys.PSI_ELEMENT_ARRAY`（`LangDataKeys extends PlatformCoreDataKeys`，通过子类访问也能解析）。
+  写成 `CommonDataKeys.PSI_ELEMENT_ARRAY` 会编译报"找不到符号"。
+- **诊断优先于猜测**：失败提示不要一句话盖所有分支，返回带原因的 `Result` 并打日志，一次点击就能定位问题环节。
+

@@ -5,6 +5,13 @@
 - 画板核心：`KanbanBoard`（编排层）+ 工具类（`BoardPersistence` / `BoardExportUtil` / `BoardContextMenu` / `BoardSnapHelper` / `BoardSearchModel` / `BoardViewport` / `NotificationUtil`）
 - 数据模型：`com.wd.model`（ChartData / TableCardModel / ChartRelation / RelationType）
 - DB 元信息反射：`com.wd.db.DatabaseTableMetadataFetcher`（全反射访问 `com.intellij.database.*`）
+- 表跳转：`com.wd.db.TableNavigator`（复用 Database 原生能力，见第 10 条）
+
+## 构建环境（2026-09-21 更新）
+- `build.gradle.kts` 的 `intellij.localPath` = `/Applications/IntelliJ IDEA.app/Contents`，
+  即 **IntelliJ IDEA 2024.1.6 / build 241.19072.14（IU）**（不再是下载版 2023.2.6）。
+- 核对 Database 插件 API 请用：`/Applications/IntelliJ IDEA.app/Contents/plugins/DatabaseTools/lib/database-plugin.jar`
+- 编译命令：`./gradlew compileJava`（Java 17）
 
 ## 关键设计决策
 
@@ -66,5 +73,8 @@
 - **不要持久化 PSI 元素**（重启/同步后失效），右键时用 `TableInfo` 的 datasource+schema+tableName 现场重解析。
 - 两个坑：① 组 `DbDiagrams.SourceActionsGroup.GoTo` 继承 `DiagramSourceActionsGroup`，其 `update()` 要求 DataContext 有 `DiagramDataKeys.BUILDER` 且有选中节点，否则整组被禁用 → 必须自建 `DefaultActionGroup`；② `ActionPopupMenu.setDataContext(Supplier)` 在 2023.2 可用，`ActionPlaces` 无 `CONTEXT_MENU` 常量（用 `POPUP`）。
 - 已实现（2026-09-21）：`DatabaseTableMetadataFetcher.resolveDbElement`（反射 `DbPsiFacade.findElement(DasObject)`）+ 新类 `com.wd.db.TableNavigator.performAction/isActionAvailable` + `BoardContextMenu.buildHeaderMenu` 第 4 参 `NavigateAction`（生成「跳转」JMenu 子菜单）+ `KanbanBoard.navigateToTable`。`./gradlew compileJava` 通过。
-- **实测坑：`CommonDataKeys.PSI_ELEMENT_ARRAY` 在 2023.2 不存在**（首次编译报找不到符号），只能用 `PSI_ELEMENT`。
+- **实测坑：`PSI_ELEMENT_ARRAY` 的正确归属是 `PlatformCoreDataKeys.PSI_ELEMENT_ARRAY`**（`LangDataKeys` 继承自它，通过子类访问也能解析）；写成 `CommonDataKeys.PSI_ELEMENT_ARRAY` 编译报"找不到符号"（首次编译就踩了这个）。
+- **实测坑（selector 类 Action 不可用）**：`sql.SelectInDatabaseView` 的 `update()` 要求 `SelectInContext.getVirtualFile()` 是 Database 文件系统虚拟文件（`DbImplUtil.isDatabaseVirtualFile`），合成 `AnActionEvent` 必然被置灰 → 改为**直连反射调用 `com.intellij.database.view.DatabaseView.select(PsiElement, boolean)`**（静态方法，public），绕开 `SelectInContext`/`canSelect`。
+- `resolveDbElement` 三级兜底：数据源松散匹配（忽略大小写/`@host`）→ `DbDataSource.getNameIndex().getObjectsByNameInsensitive` 查表 → `DbDataSource.findElement(DasObject)`/`DbPsiFacade.findElement`（**必须精确签名**，`DbDataSource` 还有 `findElement(ObjectPath)` 重载）。
+- 全部反射目标已在 build 241 上复核；`performAction` 返回带原因的 `Result` 便于定位失败环节。
 - 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44 节

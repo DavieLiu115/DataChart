@@ -38,6 +38,8 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	private static Class<?> dasUtilClass;
 	private static Class<?> dasDataSourceClass;
 	private static Class<?> dasObjectClass;
+	/** DasTable：用于从名称索引结果中筛出表（2026-09-21，resolveDbElement 使用） */
+	private static Class<?> dasTableClass;
 	private static boolean classesInitialized = false;
 	private static boolean classesAvailable = false;
 
@@ -231,17 +233,23 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 	 * 而 {@code .datachart} 中只持久化了 datasource + schema + tableName，
 	 * 因此需要在右键时现场把表名解析回 PSI 元素。</p>
 	 *
-	 * <p>解析链路（全部反射）：</p>
+	 * <p>解析链路（全部反射，每步都有降级兜底）：</p>
 	 * <ol>
 	 *   <li>{@code DbPsiFacade.getInstance(project)}</li>
-	 *   <li>{@code DbPsiFacade.findDataSource(name)} → {@code DbDataSource}</li>
-	 *   <li>{@code DasUtil.getTables(ds)} → 匹配同名表（{@code DasObject}）</li>
-	 *   <li>{@code DbPsiFacade.findElement(DasObject)} → {@code DbElement}（PSI 元素）</li>
+	 *   <li>{@code DbPsiFacade.findDataSource(name)} → {@code DbDataSource}；
+	 *       名字对不上时再宽松匹配（忽略大小写 / 忽略 {@code @host} 后缀 / 唯一数据源兜底）</li>
+	 *   <li>表名 → {@code DasObject}：优先 {@code DbDataSource.getNameIndex().getObjectsByNameInsensitive(name)}
+	 *       （不受 introspection level / schema 限定影响），回退 {@code DasUtil.getTables(ds)} 逐个比对</li>
+	 *   <li>{@code DbDataSource.findElement(DasObject)}，回退 {@code DbPsiFacade.findElement(DasObject)}
+	 *       → {@code DbElement}（PSI 元素）</li>
 	 * </ol>
 	 *
 	 * <p><b>调用方必须在 {@link com.intellij.openapi.application.ReadAction} 中执行</b>
 	 * （涉及 PSI / DAS 访问）。返回的元素不要长期持有：数据源同步 / IDE 重启后会失效，
 	 * 每次都重新解析即可。</p>
+	 *
+	 * <p>失败时会在 idea.log 里打印 warn（含当前可用数据源列表），便于排查
+	 * 数据源改名 / 表被删 / introspection 未完成等情况。</p>
 	 *
 	 * @param project        当前工程
 	 * @param datasourceName 数据源显示名
@@ -255,27 +263,130 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 		try {
 			Object facade = invokeStatic(dbPsiFacadeClass, "getInstance", Project.class, project);
 			if (facade == null) {
+				LOG.warn("resolveDbElement: DbPsiFacade 获取失败（表 " + tableName + "）");
 				return null;
 			}
+			// 1) 先按显示名精确匹配，失败再宽松匹配
 			Object dataSource = findDataSource(facade, datasourceName);
 			if (dataSource == null) {
-				LOG.warn("resolveDbElement: 未找到数据源 " + datasourceName + "（表 " + tableName + "）");
+				dataSource = findDataSourceLoosely(facade, datasourceName);
+			}
+			if (dataSource == null) {
+				LOG.warn("resolveDbElement: 未找到数据源 [" + datasourceName + "]，当前可用数据源 = "
+						+ listDataSourceNames(facade) + "（表 " + tableName + "）");
 				return null;
 			}
-			Object table = findTable(dataSource, tableName);
-			if (table == null) {
-				LOG.warn("resolveDbElement: 数据源 " + datasourceName + " 中未找到表 " + tableName);
+			// 2) 表名 → DasObject
+			Object dasTable = findDasTableByIndex(dataSource, tableName);
+			if (dasTable == null) {
+				dasTable = findTable(dataSource, tableName);
+			}
+			if (dasTable == null) {
+				LOG.warn("resolveDbElement: 数据源 [" + datasourceName + "] 中未找到表 " + tableName);
 				return null;
 			}
-			// 精确签名查找：DbPsiFacade.findElement(DasObject) → DbElement
-			Method findElement = dbPsiFacadeClass.getMethod("findElement", dasObjectClass);
-			Object element = invokeMethod(findElement, facade, table);
+			// 3) DasObject → PSI 元素
+			Object element = invokeFindElement(dataSource, dasTable);
+			if (element == null) {
+				element = invokeFindElement(facade, dasTable);
+			}
 			if (element == null) {
 				LOG.warn("resolveDbElement: findElement 返回 null，表 " + tableName);
 			}
 			return element;
 		} catch (Exception e) {
 			LOG.warn("resolveDbElement failed for table: " + tableName, e);
+			return null;
+		}
+	}
+
+	/**
+	 * 宽松匹配数据源：忽略大小写、忽略 {@code @host} 后缀；若工程里只有一个数据源则直接用它。
+	 *
+	 * <p>用于「.datachart 里存的是旧显示名 / 数据源改名 / 名称为 name@host 形式」等场景。</p>
+	 */
+	private static Object findDataSourceLoosely(Object facade, String name) {
+		Collection<?> sources = invokeDataSources(facade);
+		if (sources == null || sources.isEmpty()) {
+			return null;
+		}
+		if (name != null && !name.isEmpty()) {
+			String bare = name.contains("@") ? name.substring(0, name.indexOf('@')) : name;
+			// 双向：存 name@host / 存 name
+			for (Object ds : sources) {
+				String n = invokeStringNoArgs(ds, "getName");
+				if (n == null) {
+					continue;
+				}
+				if (n.equalsIgnoreCase(name) || n.equalsIgnoreCase(bare)) {
+					return ds;
+				}
+				String nBare = n.contains("@") ? n.substring(0, n.indexOf('@')) : n;
+				if (nBare.equalsIgnoreCase(bare)) {
+					return ds;
+				}
+			}
+		}
+		return sources.size() == 1 ? sources.iterator().next() : null;
+	}
+
+	/** 列出所有数据源显示名，仅用于失败日志 */
+	private static String listDataSourceNames(Object facade) {
+		Collection<?> sources = invokeDataSources(facade);
+		if (sources == null || sources.isEmpty()) {
+			return "[]";
+		}
+		StringBuilder sb = new StringBuilder("[");
+		for (Object ds : sources) {
+			if (sb.length() > 1) {
+				sb.append(", ");
+			}
+			sb.append(invokeStringNoArgs(ds, "getName"));
+		}
+		return sb.append(']').toString();
+	}
+
+	/**
+	 * 用数据源自带的名称索引用表名查 {@code DasObject}（{@code DbDataSource.getNameIndex()}）。
+	 *
+	 * <p>比 {@link #findTable} 遍历 {@code DasUtil.getTables} 更可靠：名称索引不依赖当前
+	 * introspection level，也不受 schema 限定影响。</p>
+	 */
+	private static Object findDasTableByIndex(Object dataSource, String tableName) {
+		if (dasTableClass == null) {
+			return null;
+		}
+		try {
+			Object index = invokeNoArgs(dataSource, "getNameIndex");
+			if (index == null) {
+				return null;
+			}
+			Object result = invokeWithArg(index, "getObjectsByNameInsensitive", tableName);
+			if (result instanceof Iterable) {
+				for (Object obj : (Iterable<?>) result) {
+					if (obj != null && dasTableClass.isInstance(obj)) {
+						return obj;
+					}
+				}
+			}
+		} catch (Exception e) {
+			LOG.debug("findDasTableByIndex failed", e);
+		}
+		return null;
+	}
+
+	/**
+	 * {@code DasObject} → {@code DbElement}。
+	 *
+	 * <p>必须用<b>精确签名</b> {@code getMethod("findElement", DasObject.class)}：
+	 * {@code DbDataSource} 上还有 {@code findElement(ObjectPath)} 重载，按方法名查找会命中错的那个。</p>
+	 */
+	private static Object invokeFindElement(Object target, Object dasObject) {
+		try {
+			Method m = target.getClass().getMethod("findElement", dasObjectClass);
+			return invokeMethod(m, target, dasObject);
+		} catch (Exception e) {
+			LOG.debug("invokeFindElement failed: " + target.getClass().getSimpleName(), e);
 			return null;
 		}
 	}
@@ -425,6 +536,8 @@ public class DatabaseTableMetadataFetcher implements TableMetadataFetcher {
 			dasDataSourceClass = Class.forName("com.intellij.database.model.DasDataSource");
 			// DasUtil.getColumns 参数类型是 com.intellij.database.model.DasObject
 			dasObjectClass = Class.forName("com.intellij.database.model.DasObject");
+			// 名称索引结果筛选用（表类型）
+			dasTableClass = Class.forName("com.intellij.database.model.DasTable");
 			// 验证 DasColumn 类可加载（仅做存在性校验）
 			Class.forName("com.intellij.database.model.DasColumn");
 			classesAvailable = true;

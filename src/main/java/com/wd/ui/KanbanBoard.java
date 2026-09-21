@@ -1706,13 +1706,12 @@ public class KanbanBoard extends JPanel {
 		if (info == null) {
 			return false;
 		}
-		boolean ok = com.wd.db.TableNavigator.performAction(project, info, actionId);
-		if (!ok) {
-			NotificationUtil.info("跳转失败",
-					"未找到表 " + info.getName() + "（数据源：" + info.getDatasourceName()
-							+ "），请先在 Database 工具窗口中刷新后重试");
+		com.wd.db.TableNavigator.Result result =
+				com.wd.db.TableNavigator.performAction(project, info, actionId);
+		if (!result.isSuccess()) {
+			NotificationUtil.info("跳转失败", result.getMessage());
 		}
-		return ok;
+		return result.isSuccess();
 	}
 
 	/**
