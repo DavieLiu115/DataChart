@@ -9,6 +9,7 @@ import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SearchTextField;
 import com.wd.i18n.DataChartBundle;
+import com.wd.i18n.DataChartLanguage;
 import com.wd.icon.PluginIcons;
 import com.wd.model.ChartData;
 import com.alibaba.fastjson.JSON;
@@ -49,6 +50,8 @@ public class DataChartView extends DialogWrapper {
 	private JButton fitButton;
 	private JButton donateButton;
 	private JButton oneOneButton;
+	/** 语言切换按钮（EN / 中文，默认英文，选择结果持久化） */
+	private JButton languageButton;
 	private KanbanBoard kanbanBoard;
 	private Project project;
 
@@ -93,19 +96,71 @@ public class DataChartView extends DialogWrapper {
 		exportPictureButton.setIcon(PluginIcons.image);
 		// focusButton 用 reset 图标（"回到原点/居中"的视觉语义）
 		focusButton.setIcon(PluginIcons.autoLayout);
-		focusButton.setText("Recenter");
 		oneOneButton.setIcon(PluginIcons.actualZoom);
-		oneOneButton.setText("100%");
 		fitButton.setIcon(PluginIcons.fitContent);
-		fitButton.setText("Fit");
 		donateButton.setIcon(PluginIcons.Donation);
 		donateButton.setRolloverIcon(PluginIcons.Donation_Enter);
 		donateButton.setContentAreaFilled(false);
 		donateButton.setBorderPainted(false);
-		donateButton.setToolTipText("Donation");
+		if (languageButton != null) {
+			languageButton.addActionListener(e -> DataChartLanguage.toggle());
+		}
+
+		// 语言切换后刷新本视图文案；视图销毁时自动退订
+		//（DialogWrapper 自身不是 Disposable，用 getDisposable() 拿它的生命周期对象）
+		ApplicationManager.getApplication().getMessageBus()
+				.connect(getDisposable())
+				.subscribe(DataChartLanguage.CHANGED, (Runnable) this::applyTexts);
+
+		// 按钮文字 / tooltip 统一在 applyTexts 里设置，切语言时重跑
+		applyTexts();
 
 		// 初次构造后立即刷新一次 zoom 显示（100%）
 		updateSearchStatusLabel();
+	}
+
+	/**
+	 * 应用当前语言下的界面文案（按钮文字 + tooltip）。
+	 *
+	 * <p>语言切换（订阅 {@link DataChartLanguage#CHANGED}）后会再次调用，因此这里要覆盖
+	 * 视图里所有「建好之后不会再更新」的文案；右键菜单等每次现建的文案不在此列。</p>
+	 */
+	private void applyTexts() {
+		if (focusButton != null) {
+			focusButton.setText(DataChartBundle.message("DataChart.view.toolbar.recenter.text"));
+			focusButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.recenter.tooltip"));
+		}
+		if (fitButton != null) {
+			fitButton.setText(DataChartBundle.message("DataChart.view.toolbar.fit.text"));
+			fitButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.fit.tooltip"));
+		}
+		if (oneOneButton != null) {
+			// 100% 是数值，不参与翻译
+			oneOneButton.setText("100%");
+			oneOneButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.zoom100.tooltip"));
+		}
+		if (exportPDFButton != null) {
+			exportPDFButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.exportPdf.tooltip"));
+		}
+		if (exportPictureButton != null) {
+			exportPictureButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.exportImage.tooltip"));
+		}
+		if (donateButton != null) {
+			donateButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.donate.tooltip"));
+		}
+		if (languageButton != null) {
+			boolean chinese = DataChartLanguage.isChinese();
+			// 语言按钮自身用「该语言怎么写」标注（EN / 中文），这是语言选择器的惯例，不参与翻译
+			languageButton.setText(chinese ? DataChartLanguage.DISPLAY_ZH : DataChartLanguage.DISPLAY_EN);
+			languageButton.setToolTipText(DataChartBundle.message(chinese
+					? "DataChart.view.toolbar.language.tooltip.toEn"
+					: "DataChart.view.toolbar.language.tooltip.toZh"));
+		}
+		// 按钮文字宽度变化后需要重排工具栏
+		if (headerTool != null) {
+			headerTool.revalidate();
+			headerTool.repaint();
+		}
 	}
 
 	/**
@@ -113,7 +168,6 @@ public class DataChartView extends DialogWrapper {
 	 */
 	private void setupToolBarButtons() {
 	if (focusButton != null) {
-		focusButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.recenter.tooltip"));
 		focusButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
 				kanbanBoard.focusView();
@@ -121,7 +175,6 @@ public class DataChartView extends DialogWrapper {
 		});
 	}
 	if (fitButton != null) {
-		fitButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.fit.tooltip"));
 		fitButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
 				kanbanBoard.fitView();
@@ -133,7 +186,6 @@ public class DataChartView extends DialogWrapper {
 	//	fullScreamButton.addActionListener(e -> toggleFullScreen());
 	//}
 	if (oneOneButton != null) {
-		oneOneButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.zoom100.tooltip"));
 		oneOneButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
 				// 只重置缩放为 100%，不移动位置（职责与 Focus 正交）
@@ -142,11 +194,9 @@ public class DataChartView extends DialogWrapper {
 		});
 	}
 	if (exportPDFButton != null) {
-			exportPDFButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.exportPdf.tooltip"));
 			exportPDFButton.addActionListener(e -> exportAsPdf());
 		}
 		if (exportPictureButton != null) {
-			exportPictureButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.exportImage.tooltip"));
 			exportPictureButton.addActionListener(e -> exportAsImage());
 		}
 		if (donateButton != null) {

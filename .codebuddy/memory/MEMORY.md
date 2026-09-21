@@ -14,9 +14,13 @@
     + `DataChartBoundle_zh.properties`（中文，非 ASCII 用 `\uXXXX` 转义）。key 命名 `DataChart.<模块>.<语义>`，
     新增 key 两个文件都要加。
   - `DataChartBundle extends com.intellij.DynamicBundle`，路径 `"messages.DataChartBoundle"` 相对 classpath 根。
-  - **2026-09-21 已完成全量迁移**：71 个 key，覆盖 BoardContextMenu / DataChartView / KanbanBoard /
-    KanbanCard / DataChartEditor / TableNavigator / TableDropHandler / Donation；
+  - **2026-09-21 已完成全量迁移**：73 个 key（71 代码 + 2 plugin.xml），覆盖 BoardContextMenu /
+    DataChartView / KanbanBoard / KanbanCard / DataChartEditor / TableNavigator / TableDropHandler / Donation；
     日志、注释、数据库来的数据（表名/列名）保持中文不动。
+  - **plugin.xml 也本地化**：`<resource-bundle>messages.DataChartBoundle</resource-bundle>` +
+    `<description>%DataChart.plugin.description</description>` +
+    `<notificationGroup ... bundle="messages.DataChartBoundle" key="DataChart.notification.group"/>`。
+    遗留的 `DataToolsBoundle_*.properties` 已删除。
   - ⚠️ MessageFormat 陷阱：文案里的**单引号**会被当转义引号；**占位符参数别直接传 `int`**（会加千分位），
     统一 `String.valueOf(n)`。详见 DEVELOPMENT_GUIDE 第 47 节。
   - ⚠️ `resources/messages/DataToolsBoundle_*.properties` 是遗留文件（0 引用、无 base 文件），新代码别用。
@@ -27,7 +31,10 @@
 - `build.gradle.kts` 的 `intellij.localPath` = `/Applications/IntelliJ IDEA.app/Contents`，
   即 **IntelliJ IDEA 2024.1.6 / build 241.19072.14（IU）**（不再是下载版 2023.2.6）。
 - 核对 Database 插件 API 请用：`/Applications/IntelliJ IDEA.app/Contents/plugins/DatabaseTools/lib/database-plugin.jar`
-- 编译命令：`./gradlew compileJava`（Java 17）
+- 编译命令：`./gradlew compileJava`（Java 17）；完整打包：`./gradlew clean buildPlugin`
+- ⚠️ `:instrumentCode` 报 `taskdef class com.intellij.ant.InstrumentIdeaExtensions cannot be found` 时
+  **先 `./gradlew clean buildPlugin`**（本次就是陈旧构建状态导致的假报错，clean 后成功）。
+  `runIde` 也依赖 `instrumentCode`；**不要关闭 instrumentCode**（`.form` 绑定代码靠它生成）。
 
 ## 关键设计决策
 

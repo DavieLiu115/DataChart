@@ -1264,3 +1264,46 @@ JMenuItem item = new FlatMenuItem(DataChartBundle.message("DataChart.menu.find.u
 转义引号；另外**占位符参数不要直接传 `int`**（`MessageFormat` 会按本地化数字格式加千分位），
 统一 `String.valueOf(n)` 再传。
 
+#### plugin.xml 的本地化（2026-09-21）
+插件描述原来是一段「英文 + 中文混排」的 CDATA，现在也走资源包：
+
+```xml
+<!-- 声明后 plugin.xml 里就能用 %key -->
+<resource-bundle>messages.DataChartBoundle</resource-bundle>
+
+<description>%DataChart.plugin.description</description>
+
+<!-- 通知组名（会出现在 Settings → Notifications）也本地化 -->
+<notificationGroup id="DataChart" displayType="BALLOON"
+        bundle="messages.DataChartBoundle" key="DataChart.notification.group"/>
+```
+
+- `%key` 由平台在**加载插件时**解析，所以描述 / 通知组名会跟随 IDE 语言；plugin.xml 里不要再写死中英混排。
+- 描述里的 HTML 直接放进 properties 的 value（换行写 `\n`）；HTML 会折叠空白，缩进无所谓。
+- `NotificationGroupEP` 支持 `bundle` + `key` 两个属性（`javap` 确认过）。
+- `<name>` / `<vendor>` / fileType id 这类标识不翻译。
+
+#### 遗留文件清理
+`messages/DataToolsBoundle_en.properties` / `DataToolsBoundle_zh.properties`（0 引用、无 base 文件）
+已删除，`messages/` 下只保留 `DataChartBoundle.properties` + `DataChartBoundle_zh.properties`。
+
+#### 打包注意（踩过一次）
+用 `localPath` 指向本地 IDE 打包时，若 `:instrumentCode` 报
+`taskdef class com.intellij.ant.InstrumentIdeaExtensions cannot be found`，
+**先试 `./gradlew clean buildPlugin`** —— 本次就是陈旧构建状态（配置缓存 / 被跳过的
+`initializeIntelliJPlugin`）导致的假报错，clean 后即 BUILD SUCCESSFUL，并非版本不兼容。
+`runIde` 同样依赖 `instrumentCode`（`runIde → prepareSandbox → jar → instrumentedJar → instrumentCode`），
+所以这个报错会让 `runIde` 也失败，别误以为是代码问题。
+
+> ⚠️ 顺带提醒：**不要为了绕开这个报错而关闭 `instrumentCode`** —— `.form`（GUI Designer，
+> 本项目 `DataChartView` / `Donation` 用它绑定控件）的表单绑定代码就是插桩阶段生成的，关掉会在
+> 运行时字段为 null。
+
+#### 打包后的自检（本次做过的）
+```bash
+./gradlew clean buildPlugin
+unzip -l build/distributions/DataChart-1.0.0.zip          # DataChart/lib/instrumented-DataChart-1.0.0.jar
+unzip -l <plugin jar> | grep messages/                    # 资源必须位于 classpath 根：messages/xxx.properties
+unzip -p <plugin jar> META-INF/plugin.xml | grep -n "resource-bundle\|%DataChart"
+```
+
