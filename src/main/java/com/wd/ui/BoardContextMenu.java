@@ -8,6 +8,9 @@ import com.wd.model.RelationType;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -52,6 +55,26 @@ public final class BoardContextMenu {
 	private static final java.awt.Color DELETE_FOREGROUND = new JBColor(
 			new java.awt.Color(0xC62828), // 浅色主题：深红
 			new java.awt.Color(0xFF6B6B)); // 深色主题：亮红
+
+	/** 禁用态菜单项文字色：浅色中灰 / 深色亮灰 */
+	private static final java.awt.Color MENU_DISABLED_FOREGROUND = new JBColor(
+			new java.awt.Color(0x9E9E9E),
+			new java.awt.Color(0x808080));
+
+	/** 菜单行内文字距左边缘的距离（所有自绘菜单项共用，保证文字左对齐） */
+	private static final int ROW_TEXT_LEFT = 12;
+	/** 菜单行内文字距右边缘的距离 */
+	private static final int ROW_TEXT_RIGHT = 12;
+	/** 菜单行最小上下留白 */
+	private static final int ROW_VERTICAL_PADDING = 4;
+	/** 子菜单右侧箭头宽度 */
+	private static final int ARROW_WIDTH = 4;
+	/** 子菜单右侧箭头高度 */
+	private static final int ARROW_HEIGHT = 8;
+	/** 箭头距右边缘的距离 */
+	private static final int ARROW_RIGHT = 10;
+	/** 文字与箭头之间至少保留的间距 */
+	private static final int ARROW_GAP = 16;
 
 	/** 是否已对 UIManager 设置过 menu 颜色（避免重复设置） */
 	private static boolean menuUiPatched = false;
@@ -272,22 +295,20 @@ public final class BoardContextMenu {
 	}
 
 	/**
-	 * 创建一个菜单项，hover/selected 文字颜色固定为蓝色（修复白字问题）。
+	 * 创建一个自绘菜单项（hover/selected 时文字变蓝，背景始终是菜单底色）。
 	 */
 	private static JMenuItem buildStyledMenuItem(String label) {
 		patchMenuUiDefaults();
-		JMenuItem item = new JMenuItem(label);
-		item.setForeground(JBColor.foreground());
-		item.setBackground(JBColor.background());
-		item.setOpaque(true);
-		item.setSelected(false);
-		item.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
-		item.putClientProperty("MenuItem.selectionBackground", JBColor.background());
-		return item;
+		return new FlatMenuItem(label);
 	}
 
 	/**
-	 * 改 {@code UIManager} 的全局 menu 默认值，覆盖 L&F 的硬编码白色。
+	 * 改 {@code UIManager} 的全局 menu 默认值。
+	 *
+	 * <p><b>注意</b>：本方法对 {@link FlatMenuItem} / {@link FlatMenu} /
+	 * {@link FlatCheckBoxMenuItem} 这些自绘项<b>已无作用</b>（IntelliJ 的菜单 UI 会在
+	 * {@code installDefaults()} 里用 {@code JBColor.namedColor} 覆盖
+	 * {@code selectionBackground}，且其结果是全局缓存的）。保留仅为兼容历史行为。</p>
 	 */
 	private static void patchMenuUiDefaults() {
 		if (menuUiPatched) {
@@ -308,49 +329,143 @@ public final class BoardContextMenu {
 	}
 
 	/**
-	 * 自绘背景的子菜单（父项）：修复「跳转 / 关系类型」整行在子菜单展开或悬停时
-	 * 被系统强调色填充的问题。
+	 * 自绘菜单项：彻底绕开 L&amp;F 的菜单配色。
 	 *
-	 * <p><b>问题（2026-09-21）</b>：IntelliJ 只为 {@code JMenuItem} 提供了自己的 UI 实现，
-	 * {@code JMenu} 仍走 Swing L&amp;F 的菜单实现，其选中背景取 {@code Menu.selectionBackground}；
-	 * macOS 下该值就是<b>系统强调色</b> —— 用户把强调色设成粉色时，整行（含右侧箭头区）
-	 * 都会变成粉色，与兄弟菜单项「菜单底色 + 蓝字」的风格完全不一致；
-	 * 而 {@code UIManager} 层面的 patch 并不可靠（UI 安装时可能已缓存颜色）。</p>
+	 * <p><b>为什么必须自绘（2026-09-21 查证字节码）</b>：IntelliJ 的菜单 UI 在
+	 * {@code installDefaults()} 里直接覆盖了 {@code selectionBackground}：</p>
+	 * <pre>
+	 * // com.intellij.ui.plaf.beg.BegMenuItemUI / IdeaMenuUI
+	 * selectionBackground = JBColor.namedColor("Menu.selectionBackground",
+	 *                                          UIUtil.getListSelectionBackground(true));
+	 * </pre>
+	 * <p>两个关键点导致 {@code UIManager.put(...)} 和 client property <b>都改不动它</b>：</p>
+	 * <ol>
+	 *   <li>{@code JBColor.namedColor} 的结果被<b>全局缓存</b>（首次解析后就固定），
+	 *       我们后 patch 的默认值永远读不到；</li>
+	 *   <li>{@code IdeaMenuUI.fillBackground()} 里 hover 填充<b>不受 {@code isOpaque()} 控制</b>
+	 *       （{@code if (armed||selected) paintHover(...)} 在 opaque 判断之外），
+	 *       所以"关掉 opaque"也没用。</li>
+	 * </ol>
+	 * <p>结果就是 hover / 子菜单展开时整行被填成 {@code Menu.selectionBackground} 解析出来的颜色
+	 * （macOS 上是系统强调色，用户设为粉色时整行变粉）。{@code paintComponent} 里
+	 * <b>不调用 {@code super}</b>，L&amp;F 的绘制就完全不会发生，颜色只由本类决定。</p>
 	 *
-	 * <p><b>方案</b>：Swing 的 {@code BasicMenuItemUI.paintBackground} 只在
-	 * {@code menuItem.isOpaque()} 为 true 时才填充背景，因此这里
-	 * <b>关掉 opaque</b> 让 L&amp;F 不再填充强调色，改由本类自绘底色
-	 * （{@link JBColor#background()}，随主题自动切换深/浅）；</p>
-	 * <ul>
-	 *   <li>文字、右侧子菜单箭头、内边距（insets）<b>仍由 L&amp;F 绘制</b> —— 与兄弟菜单项
-	 *       的字体、对齐、箭头样式完全一致，不需要自己算 textX / preferredSize；</li>
-	 *   <li>悬停/展开时的文字色取 {@code Menu.selectionForeground}，
-	 *       已由 {@link #patchMenuUiDefaults()} 统一成 {@link #MENU_HOVER_FOREGROUND}（双态色）。</li>
-	 * </ul>
+	 * <p>配色统一为「菜单底色 + 普通字，hover 时只把文字变蓝」，与
+	 * {@link FlatCheckBoxMenuItem}、{@link FlatMenu} 保持一致；所有颜色用 {@link JBColor}
+	 * 双态，深色 / 浅色主题自动适配。</p>
+	 */
+	private static class FlatMenuItem extends JMenuItem {
+
+		FlatMenuItem(String text) {
+			super(text);
+			setOpaque(true);
+			setForeground(JBColor.foreground());
+			setBackground(JBColor.background());
+		}
+
+		/** 是否处于 hover / 被菜单选择器选中 */
+		protected boolean isHighlighted() {
+			return isArmed() || isSelected();
+		}
+
+		@Override
+		protected void paintComponent(Graphics g) {
+			// 不调 super.paintComponent：否则 L&F 会用它的 selectionBackground 盖掉整行
+			paintMenuRow(g, this, isHighlighted(), false);
+		}
+
+		@Override
+		public Dimension getPreferredSize() {
+			// 自绘后父类按 L&F 的 checkIcon / accelerator 算尺寸不可靠，手动算
+			return menuRowPreferredSize(this, false);
+		}
+	}
+
+	/**
+	 * 自绘子菜单（父项）：底色 + 文字 + 右侧箭头全部自绘，绘制逻辑与
+	 * {@link FlatMenuItem} 共用，保证「跳转 / 关系类型」与兄弟菜单项的
+	 * 文字左边界、行高、配色完全一致。
 	 */
 	private static final class FlatMenu extends JMenu {
 
 		FlatMenu(String text) {
 			super(text);
-			// 关掉 opaque → L&F 跳过背景填充（这一步是消除"整行粉色"的关键）
-			setOpaque(false);
+			setOpaque(true);
 			setForeground(JBColor.foreground());
 			setBackground(JBColor.background());
 		}
 
 		@Override
 		protected void paintComponent(Graphics g) {
-			// 1. 自己铺底色（L&F 因 opaque=false 已不再填背景）
-			Graphics2D g2d = (Graphics2D) g.create();
-			try {
-				g2d.setColor(getBackground());
-				g2d.fillRect(0, 0, getWidth(), getHeight());
-			} finally {
-				g2d.dispose();
-			}
-			// 2. 交给 L&F 画文字 + 箭头（保留其排版与配色逻辑，确保与兄弟项对齐）
-			super.paintComponent(g);
+			boolean highlighted = isSelected() || getModel().isArmed() || getModel().isRollover();
+			paintMenuRow(g, this, highlighted, true);
 		}
+
+		@Override
+		public Dimension getPreferredSize() {
+			return menuRowPreferredSize(this, true);
+		}
+	}
+
+	/**
+	 * 自绘一行菜单：底色 + 文字（+ 可选右侧子菜单箭头）。
+	 *
+	 * @param row         目标菜单项
+	 * @param highlighted 是否 hover / 展开（决定文字颜色）
+	 * @param withArrow   是否绘制右侧子菜单箭头
+	 */
+	private static void paintMenuRow(Graphics g, JMenuItem row, boolean highlighted, boolean withArrow) {
+		Graphics2D g2d = (Graphics2D) g.create();
+		try {
+			g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+					RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+
+			// 1. 底色：始终用组件自己的背景（菜单底色），绝不使用 L&F 的选中色
+			g2d.setColor(row.getBackground());
+			g2d.fillRect(0, 0, row.getWidth(), row.getHeight());
+
+			// 2. 文字：禁用态灰色 > hover 蓝色 > 主题前景色
+			Font font = row.getFont();
+			g2d.setFont(font);
+			FontMetrics fm = g2d.getFontMetrics(font);
+			Color textColor;
+			if (!row.isEnabled()) {
+				textColor = MENU_DISABLED_FOREGROUND;
+			} else if (highlighted) {
+				textColor = MENU_HOVER_FOREGROUND;
+			} else {
+				textColor = row.getForeground();
+			}
+			g2d.setColor(textColor);
+			String text = row.getText();
+			int textY = (row.getHeight() - fm.getHeight()) / 2 + fm.getAscent();
+			g2d.drawString(text == null ? "" : text, ROW_TEXT_LEFT, textY);
+
+			// 3. 右侧子菜单箭头（自绘，避免依赖 L&F 的 Menu.arrowIcon 颜色）
+			if (withArrow) {
+				int arrowRight = row.getWidth() - ARROW_RIGHT;
+				int centerY = row.getHeight() / 2;
+				g2d.fillPolygon(
+						new int[]{arrowRight - ARROW_WIDTH, arrowRight - ARROW_WIDTH, arrowRight},
+						new int[]{centerY - ARROW_HEIGHT / 2, centerY + ARROW_HEIGHT / 2, centerY},
+						3);
+			}
+		} finally {
+			g2d.dispose();
+		}
+	}
+
+	/** 自绘菜单行的首选尺寸（文字宽 + 左右留白 [+ 箭头占位]） */
+	private static Dimension menuRowPreferredSize(JMenuItem row, boolean withArrow) {
+		FontMetrics fm = row.getFontMetrics(row.getFont());
+		String text = row.getText();
+		int textWidth = (text == null) ? 0 : fm.stringWidth(text);
+		int width = ROW_TEXT_LEFT + textWidth + ROW_TEXT_RIGHT;
+		if (withArrow) {
+			width += ARROW_GAP + ARROW_WIDTH;
+		}
+		int height = fm.getHeight() + ROW_VERTICAL_PADDING * 2;
+		return new Dimension(width, height);
 	}
 
 	/**
@@ -426,10 +541,10 @@ public final class BoardContextMenu {
 				g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
 						RenderingHints.VALUE_STROKE_PURE);
 
-				// 1. 整行背景：先画菜单背景（避免后续绘制时露出组件默认色）
-				Color rowBg = isArmed() || isSelected()
-						? UIManager.getColor("MenuItem.selectionBackground")
-						: getBackground();
+				// 1. 整行背景：与其它自绘菜单项保持一致，始终用菜单底色
+				// （不再读 UIManager 的 MenuItem.selectionBackground —— IntelliJ 的菜单 UI 会在
+				//  installDefaults() 里用 JBColor.namedColor 覆盖它，读到的是不可控的值）
+				Color rowBg = getBackground();
 				if (rowBg == null) {
 					rowBg = JBColor.background();
 				}
@@ -440,10 +555,10 @@ public final class BoardContextMenu {
 				int boxY = (getHeight() - BOX_SIZE) / 2;
 				drawCheckBox(g2, BOX_LEFT_PADDING, boxY);
 
-				// 3. 文字：从 BOX_LEFT_PADDING + BOX_SIZE + 间距 开始绘制
-				//    用 Swing 内部 BasicMenuItemUI 渲染文字以保持和其它菜单项一致
-				//    简化做法：直接用 Graphics2D.drawString，文字颜色取 foreground
-				g2.setColor(getForeground());
+				// 3. 文字：与其它自绘菜单项保持一致（hover/选中变蓝，禁用态灰色）
+				Color textColor = !isEnabled() ? MENU_DISABLED_FOREGROUND
+						: (isArmed() || isSelected() ? MENU_HOVER_FOREGROUND : getForeground());
+				g2.setColor(textColor);
 				int textX = BOX_LEFT_PADDING + BOX_SIZE + 6;
 				int textY = computeTextY(g2);
 				String text = getText();

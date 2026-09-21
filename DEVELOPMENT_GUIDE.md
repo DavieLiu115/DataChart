@@ -1090,72 +1090,91 @@ SQL / XML 里引用该表名的位置都会被搜出来。
 - **`UsageTarget` 必须在 ReadAction 里构造**（内部是 `SmartPsiElementPointer`）。
 - 用 `ActionPlaces.POPUP` 时 `FindUsagesAction` 的文案/可见性逻辑才符合预期。
 
-### 46. 子菜单父项被系统强调色填充（macOS 粉色）+ 深色模式适配（2026-09-21）
+### 46. 右键菜单 hover 整行变粉（macOS 系统强调色）+ 菜单配色统一自绘（2026-09-21）
 
 #### 现象
-「跳转」父菜单项在其子菜单展开 / 鼠标悬停时，**整行（含右侧箭头区）被填成品红/粉色**，
-与兄弟菜单项「菜单底色 + hover 蓝字」的风格完全不一致（用户截图反馈）。
+右键菜单里**被 hover / 子菜单展开的那一行整行变成品红/粉色**（含右侧箭头区）。
+先出现在「跳转」母项上，改完后又在「同步表结构」等**普通菜单项**上复现 —— 说明不是某一个组件的问题，
+而是整个菜单配色链路的问题。
 
-#### 根因
-- IntelliJ 只为 `JMenuItem` 提供了自己的 UI 实现（`DarculaMenuItemUIBase` 系列），
-  **`JMenu` 仍走 Swing L&F 的菜单实现**，其选中背景取 `Menu.selectionBackground`；
-  macOS 下这个值就是**系统强调色**（用户设为粉色时整行变粉）。
-- 靠 `UIManager.put("Menu.selectionBackground", ...)` patch 不可靠：`BasicMenuItemUI` 在
-  `installDefaults()` 时就把 `selectionBackground` 缓存进了字段，UI 装完之后再改默认值不生效。
-
-#### 修复：`FlatMenu`（`BoardContextMenu` 内部类）
-关键点是 Swing 的 `BasicMenuItemUI.paintBackground`：
+#### 根因（反编译字节码确认，两次修正后才定位）
+Swing 的 `BasicMenuItemUI.paint` 把 **UI 字段 `selectionBackground`** 传给 `paintBackground`：
 
 ```java
-if (menuItem.isOpaque()) {                      // ★ 只有 opaque 才填背景
-    if (model.isArmed() || (menuItem instanceof JMenu && model.isSelected())) {
-        g.setColor(bgColor);                    // ← 这里是系统强调色
-        g.fillRect(0, 0, menuWidth, menuHeight);
-    } else { ... menuItem.getBackground() ... }
+// JDK: javax.swing.plaf.basic.BasicMenuItemUI
+public void paint(Graphics g, JComponent c) {
+    paintMenuItem(g, c, checkIcon, arrowIcon, selectionBackground, selectionForeground, gap);
 }
-```
-
-所以只要 **`setOpaque(false)`**，L&F 就不再填充选中背景；我们自己在 `paintComponent` 里铺
-`JBColor.background()`，然后 **调用 `super.paintComponent(g)` 让 L&F 继续画文字和子菜单箭头**。
-
-```java
-private static final class FlatMenu extends JMenu {
-    FlatMenu(String text) {
-        super(text);
-        setOpaque(false);                      // ★ 消除"整行粉色"的关键
-        setForeground(JBColor.foreground());
-        setBackground(JBColor.background());   // JBColor 双态，深/浅主题自动切换
-    }
-
-    @Override
-    protected void paintComponent(Graphics g) {
-        Graphics2D g2 = (Graphics2D) g.create();
-        try {
-            g2.setColor(getBackground());
-            g2.fillRect(0, 0, getWidth(), getHeight());   // 自己铺底色
-        } finally {
-            g2.dispose();
-        }
-        super.paintComponent(g);               // 文字 + 箭头仍交给 L&F（对齐、字体、箭头样式不变）
+protected void paintBackground(Graphics g, JMenuItem item, Color bgColor) {
+    if (item.isOpaque()) { /* armed/selected → fillRect(bgColor) */ }
+    else if (model.isArmed() || (item instanceof JMenu && model.isSelected())) {
+        g.setColor(bgColor); g.fillRect(...);      // ★ opaque=false 也会填！
     }
 }
 ```
 
-**为什么不做"完全自绘"**：完全自绘（不调 `super`）要自己算 textX / 箭头位置 / preferredSize，
-很容易和兄弟菜单项的文字左边界对不齐（`Menu.border` 与 `MenuItem.border` 的 insets 不一定相同），
-自绘 `preferredSize` 还可能影响弹窗整体宽度。`opaque(false)` + `super` 的方案代码最少、
-对齐最保险，也更符合"UI 一致性"要求。
+而 IntelliJ 自己的菜单 UI 在 `installDefaults()` 里**直接覆盖**了这个字段：
 
-**顺手修正的深色适配**：`MENU_HOVER_FOREGROUND` 从固定深蓝 `#2470B0` 改为 `JBColor` 双态
-（浅色 `#2470B0` / 深色 `#4A90E2`）—— 深蓝压在深色主题的暗背景上对比度不足；
-与 `FlatCheckBoxMenuItem.CHECKED_FILL` 的双态色系保持一致。
+```java
+// com.intellij.ui.plaf.beg.BegMenuItemUI   （JMenuItem 用的 UI）
+// com.intellij.ui.plaf.beg.IdeaMenuUI     （JMenu 用的 UI，继承 BasicMenuUI）
+selectionBackground = JBColor.namedColor("Menu.selectionBackground",
+                                         UIUtil.getListSelectionBackground(true));
+// IdeaMenuUI 里的 hover 填充更加不受 opaque 控制：
+private void fillBackground(...) {
+    if (c.isOpaque()) { /* 仅填菜单底色 */ }
+    if (model.isArmed() || model.isSelected()) paintHover(g, c, menu, arrowIcon);  // ★ 无条件
+}
+protected final void paintHover(...) { g.setColor(selectionBackground); ... }
+```
 
-#### 适用范围
-`buildConnectionMenu` 的「关系类型」子菜单与 `buildHeaderMenu` 的「跳转」子菜单同样处理
-（同一根因），都改为 `new FlatMenu(...)`。
+**两个致命点**（解释了为什么之前所有 hover 配色修补都无效）：
+1. `JBColor.namedColor(...)` 的结果是**全局缓存**的（首次解析后固定），所以
+   `UIManager.put("MenuItem.selectionBackground", ...)` 和 `putClientProperty(...)` 都读不到；
+2. `IdeaMenuUI` 的 hover 填充**不受 `isOpaque()` 控制**，所以"关掉 opaque"这招对 `JMenu` 完全无效
+   （对 `BegMenuItemUI` 有效，但普通菜单项的粉是另一条路径）。
 
-#### 设计原则
-- **`JMenu`（子菜单父项）的样式必须自己兜住**：IntelliJ 不管 `MenuUI`，选中背景会落到系统强调色上。
-- **优先找"关掉某行为"的开关，而不是重写整段绘制**：`setOpaque(false)` 让 L&F 跳过背景填充，
-  比完全自绘更简单、更容易保持与兄弟组件一致（自绘后父类的 `getPreferredSize()` 就不可信了）。
+→ 结论：**只要还用 L&F 画菜单，就压不住它解析出来的颜色**（macOS 上是系统强调色，用户设粉色就整行粉）。
+
+#### 修复：菜单项全部自绘，不再调用 `super.paintComponent`
+`BoardContextMenu` 新增/改造三个自绘类，`paintComponent` 内**不调用 `super`**（L&F 的绘制因此完全不发生）：
+
+| 类 | 用途 |
+| --- | --- |
+| `FlatMenuItem extends JMenuItem` | 普通菜单项（复制/同步/查找用法/删除表…） |
+| `FlatMenu extends JMenu` | 子菜单母项（跳转 / 关系类型），多画一个右侧箭头 |
+| `FlatCheckBoxMenuItem extends JCheckBoxMenuItem` | 关系类型的勾选项（原有，已改为同一套配色） |
+
+绘制逻辑抽成两个静态方法共用，保证三类项的文字左边界、行高、配色完全一致：
+
+```java
+/** 底色 + 文字（+ 可选箭头）；highlighted 决定文字颜色 */
+private static void paintMenuRow(Graphics g, JMenuItem row, boolean highlighted, boolean withArrow) {
+    // 1. 底色始终 = row.getBackground()（菜单底色），绝不使用 L&F 的选中色
+    // 2. 文字：禁用态灰色 > hover 蓝色 > 主题前景色
+    // 3. withArrow 时在右侧自绘一个小三角
+}
+private static Dimension menuRowPreferredSize(JMenuItem row, boolean withArrow) { ... }
+```
+
+统一常量（避免文字左边界对不齐）：
+`ROW_TEXT_LEFT=12` / `ROW_TEXT_RIGHT=12` / `ROW_VERTICAL_PADDING=4` /
+`ARROW_WIDTH=4` / `ARROW_HEIGHT=8` / `ARROW_RIGHT=10` / `ARROW_GAP=16`。
+
+配色全部 `JBColor` 双态（深色主题自动适配）：
+- 悬停文字：`MENU_HOVER_FOREGROUND = JBColor(#2470B0, #4A90E2)`
+- 禁用文字：`MENU_DISABLED_FOREGROUND = JBColor(#9E9E9E, #808080)`
+- 危险操作：`DELETE_FOREGROUND = JBColor(#C62828, #FF6B6B)`（原有）
+
+#### 关键经验（血泪）
+- **macOS 上"整行粉色"= 系统强调色**，不是项目自己的颜色；改颜色前先确认这个颜色是谁画的。
+- **IntelliJ 菜单 UI 会覆盖 Swing 的 `selectionBackground/selectionForeground`**：
+  `UIManager.put(...)` 与 client property 都**不可靠**（`JBColor.namedColor` 全局缓存 + `installDefaults` 覆盖）。
+  想彻底控制菜单配色 → **自绘**（`paintComponent` 不调 `super`）。
+- **`setOpaque(false)` 不是万能开关**：JDK 的 `BasicMenuItemUI.paintBackground` 有
+  `else if (armed||selected)` 分支照样填色，IntelliJ 的 `IdeaMenuUI.fillBackground` 更是完全无视 opaque。
+  —— 这一点是本次第一轮修复失败的真正原因，值得记住。
+- 自绘后**必须自己重写 `getPreferredSize()`**：父类按 L&F 的 checkIcon / accelerator 计算，
+  结果不再可信（与 `FlatCheckBoxMenuItem` 当年在 Windows 上被截断是同一个坑）。
+- `patchMenuUiDefaults()` 对本类自绘项已无作用，保留仅为兼容历史行为（已在方法注释中标注）。
 

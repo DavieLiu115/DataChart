@@ -81,5 +81,10 @@
   `UsageView.USAGE_TARGETS_KEY = { new PsiElement2UsageTargetAdapter(element, true) }`（`ReadAction` 中构造；单参构造器在 241 已 forRemoval 弃用）+ `CONTEXT_COMPONENT` 作为弹窗锚点。恰好 1 个目标时才会直接查找（等价 Alt+F7）。
 - **popup place 下不可用的动作是"隐藏"而非"置灰"**（`FindUsagesInFileAction.updateFindUsagesAction` 里 `setVisible(enabled || !isPopupPlace(place))`）。
 - **菜单项不要显示快捷键提示**（2026-09-21 用户要求去掉）：`JMenuItem.setAccelerator` 在弹窗菜单里只展示不生效，会误导用户；等真用 `registerKeyboardAction` 注册后再加。
-- **`JMenu`（子菜单父项）的选中背景会落到系统强调色上**：IntelliJ 只给 `JMenuItem` 提供自己的 UI，`JMenu` 走 Swing L&F → macOS 上整行（含箭头区）可能变成用户强调色（粉色）。`UIManager.put("Menu.selectionBackground", ...)` 无效（`BasicMenuItemUI.installDefaults` 已缓存）。解法：`BoardContextMenu.FlatMenu` —— `setOpaque(false)`（`BasicMenuItemUI.paintBackground` 只在 opaque 时填背景）+ 自绘底色后 `super.paintComponent(g)` 让 L&F 继续画文字/箭头（保证与兄弟项对齐）。菜单 hover 色统一用 `JBColor(0x2470B0, 0x4A90E2)` 双态。
+- **菜单 hover 整行变粉（macOS 系统强调色）→ 必须完全自绘**：IntelliJ 的菜单 UI（`com.intellij.ui.plaf.beg.BegMenuItemUI` / `IdeaMenuUI`）在 `installDefaults()` 里用
+  `selectionBackground = JBColor.namedColor("Menu.selectionBackground", UIUtil.getListSelectionBackground(true))` **覆盖** Swing 字段，且 `JBColor.namedColor` 结果**全局缓存** →
+  `UIManager.put(...)` 与 client property 全部无效；`IdeaMenuUI.fillBackground()` 的 hover 填充还不受 `isOpaque()` 控制（`setOpaque(false)` 也不是万能开关）。
+  **唯一可靠解**：`BoardContextMenu` 的 `FlatMenuItem` / `FlatMenu` / `FlatCheckBoxMenuItem` 三个自绘类，`paintComponent` 内**不调用 `super`**，共用 `paintMenuRow(...)` +
+  `menuRowPreferredSize(...)`，配色只用 `JBColor`（hover 蓝 `#2470B0`/`#4A90E2`、禁用灰 `#9E9E9E`/`#808080`、危险红 `#C62828`/`#FF6B6B`）；自绘后**必须自己重写 `getPreferredSize()`**。
+  详见 DEVELOPMENT_GUIDE 第 46 节。
 - 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
