@@ -81,4 +81,5 @@
   `UsageView.USAGE_TARGETS_KEY = { new PsiElement2UsageTargetAdapter(element, true) }`（`ReadAction` 中构造；单参构造器在 241 已 forRemoval 弃用）+ `CONTEXT_COMPONENT` 作为弹窗锚点。恰好 1 个目标时才会直接查找（等价 Alt+F7）。
 - **popup place 下不可用的动作是"隐藏"而非"置灰"**（`FindUsagesInFileAction.updateFindUsagesAction` 里 `setVisible(enabled || !isPopupPlace(place))`）。
 - **菜单项不要显示快捷键提示**（2026-09-21 用户要求去掉）：`JMenuItem.setAccelerator` 在弹窗菜单里只展示不生效，会误导用户；等真用 `registerKeyboardAction` 注册后再加。
+- **`JMenu`（子菜单父项）的选中背景会落到系统强调色上**：IntelliJ 只给 `JMenuItem` 提供自己的 UI，`JMenu` 走 Swing L&F → macOS 上整行（含箭头区）可能变成用户强调色（粉色）。`UIManager.put("Menu.selectionBackground", ...)` 无效（`BasicMenuItemUI.installDefaults` 已缓存）。解法：`BoardContextMenu.FlatMenu` —— `setOpaque(false)`（`BasicMenuItemUI.paintBackground` 只在 opaque 时填背景）+ 自绘底色后 `super.paintComponent(g)` 让 L&F 继续画文字/箭头（保证与兄弟项对齐）。菜单 hover 色统一用 `JBColor(0x2470B0, 0x4A90E2)` 双态。
 - 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节

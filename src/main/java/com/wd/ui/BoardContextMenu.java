@@ -37,8 +37,16 @@ import javax.swing.UIManager;
  */
 public final class BoardContextMenu {
 
-	/** 菜单项 hover/selected 时的文字颜色（蓝色） */
-	private static final java.awt.Color MENU_HOVER_FOREGROUND = new java.awt.Color(0x2470B0);
+	/**
+	 * 菜单项 hover/selected 时的文字颜色。
+	 *
+	 * <p>浅色主题用深蓝 {@code #2470B0}（与列类型文字色一致）；深色主题用更亮的
+	 * {@code #4A90E2}，否则深蓝压在暗背景上对比度不足看不清（与
+	 * {@link FlatCheckBoxMenuItem#CHECKED_FILL} 的双态色系保持一致）。</p>
+	 */
+	private static final java.awt.Color MENU_HOVER_FOREGROUND = new JBColor(
+			new java.awt.Color(0x2470B0), // 浅色：深蓝
+			new java.awt.Color(0x4A90E2)); // 深色：亮蓝
 
 	/** 危险操作菜单项（删除表）文字颜色：红色，适配深色/浅色主题 */
 	private static final java.awt.Color DELETE_FOREGROUND = new JBColor(
@@ -75,12 +83,8 @@ public final class BoardContextMenu {
 			Runnable onRepaint, Runnable onNotifyChanged, Runnable onRemove) {
 		JPopupMenu menu = buildStyledPopupMenu();
 
-		// 关系类型子菜单
-		JMenu typeMenu = new JMenu("关系类型");
-		typeMenu.setForeground(JBColor.foreground());
-		typeMenu.setBackground(JBColor.background());
-		typeMenu.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
-		typeMenu.putClientProperty("MenuItem.selectionBackground", JBColor.background());
+		// 关系类型子菜单（自绘父项，见 FlatMenu）
+		JMenu typeMenu = new FlatMenu("关系类型");
 		addRelationTypeItem(typeMenu, "一对一", RelationType.ONE_TO_ONE, conn, onRepaint, onNotifyChanged);
 		addRelationTypeItem(typeMenu, "一对多", RelationType.ONE_TO_MANY, conn, onRepaint, onNotifyChanged);
 		addRelationTypeItem(typeMenu, "多对一", RelationType.MANY_TO_ONE, conn, onRepaint, onNotifyChanged);
@@ -209,12 +213,8 @@ public final class BoardContextMenu {
 			return null;
 		}
 
-		// 与「关系类型」子菜单保持一致的样式（否则 hover 会白字看不清）
-		JMenu gotoMenu = new JMenu("跳转");
-		gotoMenu.setForeground(JBColor.foreground());
-		gotoMenu.setBackground(JBColor.background());
-		gotoMenu.putClientProperty("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
-		gotoMenu.putClientProperty("MenuItem.selectionBackground", JBColor.background());
+		// 与「关系类型」子菜单保持一致的样式
+		JMenu gotoMenu = new FlatMenu("跳转");
 
 		if (hasDdl) {
 			gotoMenu.add(buildNavigateItem("跳到 DDL", TableNavigator.ACTION_OPEN_DDL, navigateAction));
@@ -305,6 +305,52 @@ public final class BoardContextMenu {
 		defaults.put("RadioButtonMenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
 		defaults.put("RadioButtonMenuItem.selectionBackground", JBColor.background());
 		menuUiPatched = true;
+	}
+
+	/**
+	 * 自绘背景的子菜单（父项）：修复「跳转 / 关系类型」整行在子菜单展开或悬停时
+	 * 被系统强调色填充的问题。
+	 *
+	 * <p><b>问题（2026-09-21）</b>：IntelliJ 只为 {@code JMenuItem} 提供了自己的 UI 实现，
+	 * {@code JMenu} 仍走 Swing L&amp;F 的菜单实现，其选中背景取 {@code Menu.selectionBackground}；
+	 * macOS 下该值就是<b>系统强调色</b> —— 用户把强调色设成粉色时，整行（含右侧箭头区）
+	 * 都会变成粉色，与兄弟菜单项「菜单底色 + 蓝字」的风格完全不一致；
+	 * 而 {@code UIManager} 层面的 patch 并不可靠（UI 安装时可能已缓存颜色）。</p>
+	 *
+	 * <p><b>方案</b>：Swing 的 {@code BasicMenuItemUI.paintBackground} 只在
+	 * {@code menuItem.isOpaque()} 为 true 时才填充背景，因此这里
+	 * <b>关掉 opaque</b> 让 L&amp;F 不再填充强调色，改由本类自绘底色
+	 * （{@link JBColor#background()}，随主题自动切换深/浅）；</p>
+	 * <ul>
+	 *   <li>文字、右侧子菜单箭头、内边距（insets）<b>仍由 L&amp;F 绘制</b> —— 与兄弟菜单项
+	 *       的字体、对齐、箭头样式完全一致，不需要自己算 textX / preferredSize；</li>
+	 *   <li>悬停/展开时的文字色取 {@code Menu.selectionForeground}，
+	 *       已由 {@link #patchMenuUiDefaults()} 统一成 {@link #MENU_HOVER_FOREGROUND}（双态色）。</li>
+	 * </ul>
+	 */
+	private static final class FlatMenu extends JMenu {
+
+		FlatMenu(String text) {
+			super(text);
+			// 关掉 opaque → L&F 跳过背景填充（这一步是消除"整行粉色"的关键）
+			setOpaque(false);
+			setForeground(JBColor.foreground());
+			setBackground(JBColor.background());
+		}
+
+		@Override
+		protected void paintComponent(Graphics g) {
+			// 1. 自己铺底色（L&F 因 opaque=false 已不再填背景）
+			Graphics2D g2d = (Graphics2D) g.create();
+			try {
+				g2d.setColor(getBackground());
+				g2d.fillRect(0, 0, getWidth(), getHeight());
+			} finally {
+				g2d.dispose();
+			}
+			// 2. 交给 L&F 画文字 + 箭头（保留其排版与配色逻辑，确保与兄弟项对齐）
+			super.paintComponent(g);
+		}
 	}
 
 	/**

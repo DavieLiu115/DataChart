@@ -1090,3 +1090,72 @@ SQL / XML 里引用该表名的位置都会被搜出来。
 - **`UsageTarget` 必须在 ReadAction 里构造**（内部是 `SmartPsiElementPointer`）。
 - 用 `ActionPlaces.POPUP` 时 `FindUsagesAction` 的文案/可见性逻辑才符合预期。
 
+### 46. 子菜单父项被系统强调色填充（macOS 粉色）+ 深色模式适配（2026-09-21）
+
+#### 现象
+「跳转」父菜单项在其子菜单展开 / 鼠标悬停时，**整行（含右侧箭头区）被填成品红/粉色**，
+与兄弟菜单项「菜单底色 + hover 蓝字」的风格完全不一致（用户截图反馈）。
+
+#### 根因
+- IntelliJ 只为 `JMenuItem` 提供了自己的 UI 实现（`DarculaMenuItemUIBase` 系列），
+  **`JMenu` 仍走 Swing L&F 的菜单实现**，其选中背景取 `Menu.selectionBackground`；
+  macOS 下这个值就是**系统强调色**（用户设为粉色时整行变粉）。
+- 靠 `UIManager.put("Menu.selectionBackground", ...)` patch 不可靠：`BasicMenuItemUI` 在
+  `installDefaults()` 时就把 `selectionBackground` 缓存进了字段，UI 装完之后再改默认值不生效。
+
+#### 修复：`FlatMenu`（`BoardContextMenu` 内部类）
+关键点是 Swing 的 `BasicMenuItemUI.paintBackground`：
+
+```java
+if (menuItem.isOpaque()) {                      // ★ 只有 opaque 才填背景
+    if (model.isArmed() || (menuItem instanceof JMenu && model.isSelected())) {
+        g.setColor(bgColor);                    // ← 这里是系统强调色
+        g.fillRect(0, 0, menuWidth, menuHeight);
+    } else { ... menuItem.getBackground() ... }
+}
+```
+
+所以只要 **`setOpaque(false)`**，L&F 就不再填充选中背景；我们自己在 `paintComponent` 里铺
+`JBColor.background()`，然后 **调用 `super.paintComponent(g)` 让 L&F 继续画文字和子菜单箭头**。
+
+```java
+private static final class FlatMenu extends JMenu {
+    FlatMenu(String text) {
+        super(text);
+        setOpaque(false);                      // ★ 消除"整行粉色"的关键
+        setForeground(JBColor.foreground());
+        setBackground(JBColor.background());   // JBColor 双态，深/浅主题自动切换
+    }
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setColor(getBackground());
+            g2.fillRect(0, 0, getWidth(), getHeight());   // 自己铺底色
+        } finally {
+            g2.dispose();
+        }
+        super.paintComponent(g);               // 文字 + 箭头仍交给 L&F（对齐、字体、箭头样式不变）
+    }
+}
+```
+
+**为什么不做"完全自绘"**：完全自绘（不调 `super`）要自己算 textX / 箭头位置 / preferredSize，
+很容易和兄弟菜单项的文字左边界对不齐（`Menu.border` 与 `MenuItem.border` 的 insets 不一定相同），
+自绘 `preferredSize` 还可能影响弹窗整体宽度。`opaque(false)` + `super` 的方案代码最少、
+对齐最保险，也更符合"UI 一致性"要求。
+
+**顺手修正的深色适配**：`MENU_HOVER_FOREGROUND` 从固定深蓝 `#2470B0` 改为 `JBColor` 双态
+（浅色 `#2470B0` / 深色 `#4A90E2`）—— 深蓝压在深色主题的暗背景上对比度不足；
+与 `FlatCheckBoxMenuItem.CHECKED_FILL` 的双态色系保持一致。
+
+#### 适用范围
+`buildConnectionMenu` 的「关系类型」子菜单与 `buildHeaderMenu` 的「跳转」子菜单同样处理
+（同一根因），都改为 `new FlatMenu(...)`。
+
+#### 设计原则
+- **`JMenu`（子菜单父项）的样式必须自己兜住**：IntelliJ 不管 `MenuUI`，选中背景会落到系统强调色上。
+- **优先找"关掉某行为"的开关，而不是重写整段绘制**：`setOpaque(false)` 让 L&F 跳过背景填充，
+  比完全自绘更简单、更容易保持与兄弟组件一致（自绘后父类的 `getPreferredSize()` 就不可信了）。
+
