@@ -1176,5 +1176,9 @@ private static Dimension menuRowPreferredSize(JMenuItem row, boolean withArrow) 
   —— 这一点是本次第一轮修复失败的真正原因，值得记住。
 - 自绘后**必须自己重写 `getPreferredSize()`**：父类按 L&F 的 checkIcon / accelerator 计算，
   结果不再可信（与 `FlatCheckBoxMenuItem` 当年在 Windows 上被截断是同一个坑）。
-- `patchMenuUiDefaults()` 对本类自绘项已无作用，保留仅为兼容历史行为（已在方法注释中标注）。
+- **`patchMenuUiDefaults()` 已删除（2026-09-21）**：它往全局 `UIManager` 默认值表写
+  `MenuItem.selectionForeground` / `MenuItem.selectionBackground` 等 key，对自绘项已经完全无效，
+  却**可能影响 IDEA 自身菜单的配色**（全局副作用）。既然自绘已接管一切，就没有理由再动全局默认值。
+  ⇒ **原则：插件不要写全局 `UIManager` 默认值**，要什么样式就在自己的组件里自绘；否则
+  "改了别人的界面" 这种副作用很难排查。
 

@@ -23,7 +23,6 @@ import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPopupMenu;
-import javax.swing.UIManager;
 
 /**
  * 看板右键菜单构建：统一生成与当前主题适配的弹出菜单。
@@ -75,9 +74,6 @@ public final class BoardContextMenu {
 	private static final int ARROW_RIGHT = 10;
 	/** 文字与箭头之间至少保留的间距 */
 	private static final int ARROW_GAP = 16;
-
-	/** 是否已对 UIManager 设置过 menu 颜色（避免重复设置） */
-	private static boolean menuUiPatched = false;
 
 	private BoardContextMenu() {
 	}
@@ -284,10 +280,15 @@ public final class BoardContextMenu {
 	}
 
 	/**
-	 * 创建一个与当前主题适配的 JPopupMenu（修复 hover 文字看不清）。
+	 * 创建一个与当前主题适配的 JPopupMenu。
+	 *
+	 * <p>注意：弹窗与菜单项都<b>不碰 {@code UIManager} 的全局默认值</b>（历史上的
+	 * {@code patchMenuUiDefaults()} 已删除）。它会往全局默认值表里写
+	 * {@code MenuItem.selectionForeground} 等 key，从而可能影响 IDEA 自身菜单的配色；
+	 * 而对我们自己的自绘项又完全没有作用（IntelliJ 菜单 UI 会用 {@code JBColor.namedColor}
+	 * 覆盖 {@code selectionBackground}，且结果全局缓存）。</p>
 	 */
 	private static JPopupMenu buildStyledPopupMenu() {
-		patchMenuUiDefaults();
 		JPopupMenu menu = new JPopupMenu();
 		menu.setForeground(JBColor.foreground());
 		menu.setBackground(JBColor.background());
@@ -298,34 +299,7 @@ public final class BoardContextMenu {
 	 * 创建一个自绘菜单项（hover/selected 时文字变蓝，背景始终是菜单底色）。
 	 */
 	private static JMenuItem buildStyledMenuItem(String label) {
-		patchMenuUiDefaults();
 		return new FlatMenuItem(label);
-	}
-
-	/**
-	 * 改 {@code UIManager} 的全局 menu 默认值。
-	 *
-	 * <p><b>注意</b>：本方法对 {@link FlatMenuItem} / {@link FlatMenu} /
-	 * {@link FlatCheckBoxMenuItem} 这些自绘项<b>已无作用</b>（IntelliJ 的菜单 UI 会在
-	 * {@code installDefaults()} 里用 {@code JBColor.namedColor} 覆盖
-	 * {@code selectionBackground}，且其结果是全局缓存的）。保留仅为兼容历史行为。</p>
-	 */
-	private static void patchMenuUiDefaults() {
-		if (menuUiPatched) {
-			return;
-		}
-		javax.swing.UIDefaults defaults = javax.swing.UIManager.getDefaults();
-		defaults.put("MenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
-		defaults.put("MenuItem.selectionBackground", JBColor.background());
-		defaults.put("Menu.selectionForeground", MENU_HOVER_FOREGROUND);
-		defaults.put("Menu.selectionBackground", JBColor.background());
-		defaults.put("MenuItem.acceleratorSelectionForeground", MENU_HOVER_FOREGROUND);
-		defaults.put("MenuItem.acceleratorForeground", MENU_HOVER_FOREGROUND);
-		defaults.put("CheckBoxMenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
-		defaults.put("CheckBoxMenuItem.selectionBackground", JBColor.background());
-		defaults.put("RadioButtonMenuItem.selectionForeground", MENU_HOVER_FOREGROUND);
-		defaults.put("RadioButtonMenuItem.selectionBackground", JBColor.background());
-		menuUiPatched = true;
 	}
 
 	/**
