@@ -11,6 +11,7 @@ import com.intellij.openapi.fileEditor.FileEditorState;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.wd.i18n.DataChartBundle;
 import com.wd.ui.DataChartView;
 import com.wd.ui.NotificationUtil;
 import java.awt.BorderLayout;
@@ -177,7 +178,8 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		// 2026-08-27 复查补充：异步加载未完成时禁止保存，
 		// 否则 serializeToJson 会序列化尚未加载的空看板并覆盖磁盘原文件
 		if (loading) {
-			NotificationUtil.info("正在加载文件", "文件内容尚未加载完成，请稍后再保存");
+			NotificationUtil.info(DataChartBundle.message("DataChart.notify.loading"),
+					DataChartBundle.message("DataChart.editor.loading.content"));
 			return;
 		}
 		try {
@@ -194,8 +196,8 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 				}
 			});
 			if (!ok[0]) {
-				NotificationUtil.error("保存失败",
-						"写入文件失败：" + file.getName() + "，请检查磁盘空间或文件权限");
+				NotificationUtil.error(DataChartBundle.message("DataChart.notify.save.failed"),
+						DataChartBundle.message("DataChart.editor.save.writeFailed", file.getName()));
 				return;
 			}
 			lastSavedStamp = file.getModificationStamp();
@@ -203,7 +205,8 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 			setModified(false);
 		} catch (Exception e) {
 			LOG.warn("保存 .datachart 序列化失败", e);
-			NotificationUtil.error("保存失败", "序列化看板失败：" + e.getMessage());
+			NotificationUtil.error(DataChartBundle.message("DataChart.notify.save.failed"),
+					DataChartBundle.message("DataChart.editor.save.serializeFailed", e.getMessage()));
 		}
 	}
 

@@ -15,6 +15,7 @@ import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
 import com.intellij.psi.PsiElement;
 import com.intellij.usages.UsageTarget;
 import com.intellij.usages.UsageView;
+import com.wd.i18n.DataChartBundle;
 import java.awt.Component;
 import java.lang.reflect.Method;
 import org.jetbrains.annotations.Nullable;
@@ -136,7 +137,7 @@ public final class TableNavigator {
 	public static Result performAction(@Nullable Project project, @Nullable TableInfo info,
 			@Nullable String actionId, @Nullable Component contextComponent) {
 		if (project == null || project.isDisposed() || info == null || actionId == null) {
-			return Result.fail("跳转参数无效");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.invalid"));
 		}
 		if (ACTION_SELECT_IN_DATABASE_VIEW.equals(actionId)) {
 			return selectInDatabaseView(project, info);
@@ -160,7 +161,7 @@ public final class TableNavigator {
 	public static Result selectInDatabaseView(Project project, TableInfo info) {
 		Method select = databaseViewSelectMethod();
 		if (select == null) {
-			return Result.fail("IDE 中没有启用 Database 插件，无法定位到 Database Explorer");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.noDatabasePlugin.explorer"));
 		}
 		PsiElement element = resolvePsiElement(project, info);
 		if (element == null) {
@@ -173,7 +174,7 @@ public final class TableNavigator {
 			return Result.ok();
 		} catch (Exception e) {
 			LOG.warn("DatabaseView.select 调用失败: " + info.getName(), e);
-			return Result.fail("定位到 Database Explorer 失败，详细原因见 idea.log（搜索 selectInDatabaseView）");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.explorer.failed"));
 		}
 	}
 
@@ -184,7 +185,7 @@ public final class TableNavigator {
 			String actionId, @Nullable Component contextComponent) {
 		AnAction action = ActionManager.getInstance().getAction(actionId);
 		if (action == null) {
-			return Result.fail("IDE 中没有启用 Database 插件，无法执行该跳转");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.noDatabasePlugin"));
 		}
 		PsiElement element = resolvePsiElement(project, info);
 		if (element == null) {
@@ -210,8 +211,8 @@ public final class TableNavigator {
 				builder.add(UsageView.USAGE_TARGETS_KEY, usageTargets);
 			} catch (Exception e) {
 				LOG.warn("构造 FindUsages UsageTarget 失败: " + info.getName(), e);
-				return Result.fail("无法为表 " + info.getName()
-						+ " 构造查找目标，详细原因见 idea.log（搜索 TableNavigator）");
+				return Result.fail(DataChartBundle.message(
+						"DataChart.navigate.findUsages.failed", info.getName()));
 			}
 		}
 		DataContext dataContext = builder.build();
@@ -229,17 +230,17 @@ public final class TableNavigator {
 			});
 		} catch (Exception e) {
 			LOG.warn("跳转动作 update 异常: " + actionId, e);
-			return Result.fail("跳转失败（" + actionId + "），详细原因见 idea.log");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
 		}
 		if (!enabled) {
 			LOG.warn("跳转动作在当前上下文被置灰: " + actionId + ", place=" + ActionPlaces.POPUP);
-			return Result.fail("该跳转在当前上下文不可用（" + actionId + "）");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.action.disabled", actionId));
 		}
 		try {
 			action.actionPerformed(event);
 		} catch (Exception e) {
 			LOG.warn("跳转动作执行异常: " + actionId, e);
-			return Result.fail("跳转失败（" + actionId + "），详细原因见 idea.log");
+			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
 		}
 		return Result.ok();
 	}
@@ -275,12 +276,8 @@ public final class TableNavigator {
 
 	/** 解析不到表时给用户的提示（同时指向 idea.log 里的 resolveDbElement 日志） */
 	private static String notFoundMessage(TableInfo info) {
-		return "未能在 Database 工具窗口中找到表 " + info.getName()
-				+ "（数据源：" + info.getDatasourceName() + "）。请确认："
-				+ "① 数据源已连接并完成 introspection；"
-				+ "② 表未被删除或重命名；"
-				+ "③ 数据源显示名未变更。"
-				+ "详细原因见 idea.log（搜索 resolveDbElement）";
+		return DataChartBundle.message("DataChart.navigate.tableNotFound",
+				info.getName(), info.getDatasourceName());
 	}
 
 	// ========== DatabaseView.select 反射（懒加载 + 缓存） ==========

@@ -1011,10 +1011,10 @@ m.invoke(null, element, Boolean.TRUE);
   写成 `CommonDataKeys.PSI_ELEMENT_ARRAY` 会编译报"找不到符号"。
 - **诊断优先于猜测**：失败提示不要一句话盖所有分支，返回带原因的 `Result` 并打日志，一次点击就能定位问题环节。
 
-### 45. 表头右键「查找用法」：Find Usages 在非编辑器组件里的正确接入（2026-09-21）
+### 45. 表头右键「查找引用」：Find Usages 在非编辑器组件里的正确接入（2026-09-21）
 
 #### 需求
-表头右键加「查找用法」，点击弹出 Find 结果窗口（等价 IDEA 图上 `Find Usages ⌥F7`）。
+表头右键加「查找引用」，点击弹出 Find 结果窗口（等价 IDEA 图上 `Find Usages ⌥F7`）。
 注意：图右键菜单里的 `Find Usages` 就是平台通用动作 id `FindUsages`，Database 插件并没有自己的实现。
 
 #### 关键结论：2024.1 的 `FindUsagesAction` **不读 `CommonDataKeys.PSI_ELEMENT`**
@@ -1074,7 +1074,7 @@ SQL / XML 里引用该表名的位置都会被搜出来。
 `JBPopupFactory.guessBestPopupLocation(ctx)`，没有锚点组件时弹窗定位不可靠。
 
 #### 菜单
-- 「查找用法」放**顶层**（与 IDEA 图右键菜单一致：Find Usages 在 Go To 之前），
+- 「查找引用」放**顶层**（与 IDEA 图右键菜单一致：Find Usages 在 Go To 之前），
   「跳转」子菜单紧随其后，两者共用同一个 `NavigateAction` 回调，只是 actionId 不同。
 - **不要在菜单项上显示快捷键提示**（2026-09-21 用户反馈后去掉）：曾用
   `ActionManager.getKeyboardShortcut(id)` + `JMenuItem.setAccelerator(...)` 在菜单项右侧显示
@@ -1141,7 +1141,7 @@ protected final void paintHover(...) { g.setColor(selectionBackground); ... }
 
 | 类 | 用途 |
 | --- | --- |
-| `FlatMenuItem extends JMenuItem` | 普通菜单项（复制/同步/查找用法/删除表…） |
+| `FlatMenuItem extends JMenuItem` | 普通菜单项（复制/同步/查找引用/删除表…） |
 | `FlatMenu extends JMenu` | 子菜单母项（跳转 / 关系类型），多画一个右侧箭头 |
 | `FlatCheckBoxMenuItem extends JCheckBoxMenuItem` | 关系类型的勾选项（原有，已改为同一套配色） |
 
@@ -1181,4 +1181,86 @@ private static Dimension menuRowPreferredSize(JMenuItem row, boolean withArrow) 
   却**可能影响 IDEA 自身菜单的配色**（全局副作用）。既然自绘已接管一切，就没有理由再动全局默认值。
   ⇒ **原则：插件不要写全局 `UIManager` 默认值**，要什么样式就在自己的组件里自绘；否则
   "改了别人的界面" 这种副作用很难排查。
+
+### 47. 国际化（i18n）规范（2026-09-21）
+
+#### 现状与资源包
+- `src/main/resources/messages/` 下原有的 `DataToolsBoundle_*.properties` 是**遗留文件**：
+  代码里 0 引用、key 与本插件无关（数据库连接 / Excel 导出 / 代码模板），且**没有 base 文件**
+  （只有 `_zh` 和 `_en`）→ `ResourceBundle.getBundle` 在非中英文 locale 下会抛
+  `MissingResourceException`。新的代码不要再用它。
+- 本插件自己的资源包（沿用同一个 `messages/` 目录）：
+  - `messages/DataChartBoundle.properties` —— **默认语言（英文），必需**
+  - `messages/DataChartBoundle_zh.properties` —— 简体中文
+
+#### 用法
+```java
+import com.wd.i18n.DataChartBundle;
+
+JMenuItem item = new FlatMenuItem(DataChartBundle.message("DataChart.menu.find.usages"));
+```
+`DataChartBundle extends DynamicBundle`（不是裸 `ResourceBundle`）：IDE 切换 Language Pack 后
+无需重启即可取到新语言文案。路径 `messages.DataChartBoundle` 是**相对 classpath 根**的
+（`AbstractBundle(String)` 只是把路径原样存下，最终交给
+`ResourceBundle.getBundle(path, locale, classloader)`）。
+
+#### 规范（重要）
+1. **Java 代码里不写死用户可见文案**：菜单项 / tooltip / 通知 / 对话框 / 按钮文字一律走
+   `DataChartBundle.message(key)`。日志（`LOG.warn`）不算用户可见文案，可以直接写中文。
+2. **key 命名**：`DataChart.<模块>.<语义>`，如 `DataChart.menu.find.usages`。
+   新增 key 时**两个文件都要加**，否则英文环境抛 `MissingResourceException`。
+3. **base 文件（英文）必须存在**，否则非 zh/en 的 locale 直接崩。
+4. **中文写成 `\uXXXX` 转义**（`Properties` 是 ISO-8859-1 编码）。用 `native2ascii` 或脚本转换，别手敲。
+
+#### 踩坑
+- **Java 注释里也不能出现 `\uXXXX`**：Java 词法器在解析之前就扫描整个文件做 Unicode 转义，
+  注释 / javadoc 里写 `{@code \uXXXX}` 会直接报 `错误: 非法的 Unicode 转义`。
+  文档里要表达这种形式时，用「反斜杠 + u + 4 位十六进制」这类描述性写法。
+- **验证方法**（比在 IDE 里试快得多，本次就是这么验的）：
+  ```bash
+  jshell -q --class-path src/main/resources
+  # 中文：ResourceBundle.getBundle("messages.DataChartBoundle", new Locale("zh","CN"))
+  #          .getString("DataChart.menu.find.usages")  → 查找引用
+  # 英文：先 Locale.setDefault(Locale.ENGLISH) 再取              → Find References
+  # 再比对两个文件的 keySet 是否一致（少了 key，英文环境会抛异常）
+  ```
+- Java 的 **default locale 回退**：机器默认 locale 是 zh_CN 时，
+  `getBundle(name, Locale.ENGLISH)` 也会返回中文包（先试 `_en`，再试默认 locale 链）—— 这不是 bug。
+
+#### 全量迁移结果（2026-09-21）
+已把项目里**所有用户可见文案**迁到资源包（71 个 key，base/zh 完全对齐），涉及 7 个文件：
+
+| 文件 | 迁移内容 |
+| --- | --- |
+| `BoardContextMenu` | 表头菜单 / 跳转子菜单 / 连线菜单（18 个 key，最早迁移） |
+| `DataChartView` | 工具栏 tooltip、导出 PDF/图片的对话框标题 + 过滤器 + 进度标题 + 成功/失败通知、打开文件失败、搜索状态 tooltip |
+| `KanbanBoard` | 卡片 tooltip、删除表二次确认（单选/多选）、同步失败/成功通知、跳转失败标题 |
+| `KanbanCard` | 画布上的 `(未命名)` / `类型: x` / `... 共 N 列` |
+| `DataChartEditor` | 加载中提示、保存失败（写文件 / 序列化） |
+| `TableNavigator` | 全部 `Result.fail(...)` 文案（跳转失败原因） |
+| `TableDropHandler` | 拖拽落点提示「拖放到看板」 |
+| `Donation` | 捐赠对话框标题 + 两行说明 |
+
+#### 什么**不**需要迁移
+- **日志**（`LOG.warn/info/debug`、`printStackTrace` 替代品）：给开发者看的，保持中文即可，不必进资源包。
+- **注释 / javadoc**：不是运行时文案。
+- 数据本身（表名、列名、注释）：来自数据库，不算插件文案。
+
+#### 迁移的机械做法（可复用）
+写一次性 Python 脚本做批量替换，关键是**每条替换都断言命中次数**，任一条对不上就整体不写入，
+避免"静默改错半行"。脚本还顺手做了三件事：
+1. 自动补 `import com.wd.i18n.DataChartBundle;`（插到 import 块的字母序位置）；
+2. 重建两个属性文件（非 ASCII 与换行统一转义）；
+3. 输出改动清单。
+
+#### 迁移后的自动校验（都做过，全绿）
+```bash
+# ① 文案出口反向扫描：所有 NotificationUtil.* / setToolTipText / setDialogTitle /
+#    setDropPossible / setTitle / Result.fail 的参数里不应再有中文字面量
+# ② key 完整性：代码引用的 key 集合 == base 文件 key 集合 == zh 文件 key 集合
+# ③ jshell 实跑：带 {0} 占位符的中英文都要能正确格式化（含 \n 保留）
+```
+③ 尤其值得做 —— `AbstractBundle.getMessage` 走 `MessageFormat`，一旦文案里出现**单引号**就会被当成
+转义引号；另外**占位符参数不要直接传 `int`**（`MessageFormat` 会按本地化数字格式加千分位），
+统一 `String.valueOf(n)` 再传。
 

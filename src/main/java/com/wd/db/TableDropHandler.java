@@ -7,6 +7,7 @@ import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.wd.i18n.DataChartBundle;
 import java.awt.Point;
 import java.awt.datatransfer.DataFlavor;
 import javax.swing.JComponent;
@@ -90,7 +91,7 @@ public class TableDropHandler implements DnDTarget {
 		// 判断拖拽数据中是否包含数据库表元素
 		Object dbElement = findFirstDbElement(event);
 		if (dbElement != null) {
-			event.setDropPossible(true, "拖放到看板");
+			event.setDropPossible(true, DataChartBundle.message("DataChart.dnd.dropHere"));
 			return true;
 		}
 		return false;

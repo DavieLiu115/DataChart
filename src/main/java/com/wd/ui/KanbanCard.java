@@ -3,6 +3,7 @@ package com.wd.ui;
 import com.intellij.ui.JBColor;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableInfo;
+import com.wd.i18n.DataChartBundle;
 import com.wd.icon.PluginIcons;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -890,7 +891,7 @@ public class KanbanCard {
 		g2d.setColor(isDark ? HEADER_TEXT_DARK : HEADER_TEXT_LIGHT);
 		g2d.setFont(headerFont);
 		FontMetrics headerFm = g2d.getFontMetrics();
-		String headerText = name == null ? "(未命名)" : name;
+		String headerText = name == null ? DataChartBundle.message("DataChart.card.unnamed") : name;
 		int headerTextX = (int) bounds.getX() + padding;
 		int headerTextY = (int) bounds.getY() + (headerHeight + headerFm.getAscent() - headerFm.getDescent()) / 2;
 		g2d.drawString(headerText, headerTextX, headerTextY);
@@ -900,7 +901,8 @@ public class KanbanCard {
 		g2d.setFont(bodyFont);
 
 		int bodyY = (int) bounds.getY() + headerHeight + padding + 5;
-		String typeText = "类型: " + (type == null ? "" : type.toUpperCase());
+		String typeText = DataChartBundle.message("DataChart.card.type",
+				type == null ? "" : type.toUpperCase());
 		g2d.drawString(typeText, (int) bounds.getX() + padding, bodyY);
 		bodyY += 18;
 
@@ -1193,8 +1195,8 @@ public class KanbanCard {
 		if (columns.size() > rowCount) {
 			g2d.setColor(commentColor);
 			g2d.setFont(italicCommentFont);
-			g2d.drawString("... 共 " + columns.size() + " 列",
-					leftX, (int) maxBodyY);
+			g2d.drawString(DataChartBundle.message("DataChart.card.truncatedColumns",
+					String.valueOf(columns.size())), leftX, (int) maxBodyY);
 		}
 
 		// 最后一行下方的分隔线（与上方各行分隔线一致，闭合卡片 body）

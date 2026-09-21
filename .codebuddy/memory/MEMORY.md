@@ -7,6 +7,22 @@
 - DB 元信息反射：`com.wd.db.DatabaseTableMetadataFetcher`（全反射访问 `com.intellij.database.*`）
 - 表跳转：`com.wd.db.TableNavigator`（复用 Database 原生能力，见第 10 条）
 
+## 项目约定
+- **不要写死用户可见文案（用户明确要求）**：菜单项 / tooltip / 通知 / 对话框一律走
+  `com.wd.i18n.DataChartBundle.message(key, params...)`；日志可以写中文。
+  - 资源包：`resources/messages/DataChartBoundle.properties`（base 英文，**必需**）
+    + `DataChartBoundle_zh.properties`（中文，非 ASCII 用 `\uXXXX` 转义）。key 命名 `DataChart.<模块>.<语义>`，
+    新增 key 两个文件都要加。
+  - `DataChartBundle extends com.intellij.DynamicBundle`，路径 `"messages.DataChartBoundle"` 相对 classpath 根。
+  - **2026-09-21 已完成全量迁移**：71 个 key，覆盖 BoardContextMenu / DataChartView / KanbanBoard /
+    KanbanCard / DataChartEditor / TableNavigator / TableDropHandler / Donation；
+    日志、注释、数据库来的数据（表名/列名）保持中文不动。
+  - ⚠️ MessageFormat 陷阱：文案里的**单引号**会被当转义引号；**占位符参数别直接传 `int`**（会加千分位），
+    统一 `String.valueOf(n)`。详见 DEVELOPMENT_GUIDE 第 47 节。
+  - ⚠️ `resources/messages/DataToolsBoundle_*.properties` 是遗留文件（0 引用、无 base 文件），新代码别用。
+  - ⚠️ **Java 注释里也不能出现 `\uXXXX`**（词法器先做 Unicode 转义扫描 → 编译报"非法的 Unicode 转义"）。
+- 菜单/弹窗样式：插件自己自绘（见"关键设计决策"第 10 条），**不要写全局 `UIManager` 默认值**。
+
 ## 构建环境（2026-09-21 更新）
 - `build.gradle.kts` 的 `intellij.localPath` = `/Applications/IntelliJ IDEA.app/Contents`，
   即 **IntelliJ IDEA 2024.1.6 / build 241.19072.14（IU）**（不再是下载版 2023.2.6）。

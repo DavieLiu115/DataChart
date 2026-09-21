@@ -8,6 +8,7 @@ import com.intellij.ui.Gray;
 import com.intellij.ui.JBColor;
 import com.wd.db.TableDropHandler;
 import com.wd.db.TableInfo;
+import com.wd.i18n.DataChartBundle;
 import com.wd.model.ChartData;
 import com.wd.model.ChartRelation;
 import com.wd.model.RelationType;
@@ -651,9 +652,10 @@ public class KanbanBoard extends JPanel {
 					} else if (rowIndex == -1) {
 						com.wd.db.TableInfo ti = card.getTableInfo();
 						if (ti != null) {
-							String tip = "表: " + ti.getName() +
-									(ti.getComment() == null || ti.getComment().isEmpty()
-											? "" : "\n注释: " + ti.getComment());
+							String tip = DataChartBundle.message("DataChart.board.card.tooltip.table", ti.getName())
+									+ (ti.getComment() == null || ti.getComment().isEmpty()
+											? "" : DataChartBundle.message(
+													"DataChart.board.card.tooltip.comment", ti.getComment()));
 							KanbanBoard.this.setToolTipText(tip);
 						}
 					} else {
@@ -887,8 +889,9 @@ public class KanbanBoard extends JPanel {
 		}
 		if (hasRelations) {
 			boolean confirmed = NotificationUtil.confirmYesNo(project,
-					"删除数据库表",
-					"选中的 " + toDelete.size() + " 张表中存在与其他表的连线，删除后连线关系将一并移除。\n\n确定要删除吗？",
+					DataChartBundle.message("DataChart.board.delete.table.title"),
+					DataChartBundle.message("DataChart.board.delete.multi.message",
+							String.valueOf(toDelete.size())),
 					com.intellij.openapi.ui.Messages.getYesButton(),
 					com.intellij.openapi.ui.Messages.getNoButton());
 			if (!confirmed) {
@@ -924,8 +927,8 @@ public class KanbanBoard extends JPanel {
 
 		if (confirmRelations && hasRelationsFor(card.getId())) {
 			boolean confirmed = NotificationUtil.confirmYesNo(project,
-					"删除数据库表",
-					"表 \"" + card.getName() + "\" 存在与其他表的连线，删除后连线关系将一并移除。\n\n确定要删除吗？",
+					DataChartBundle.message("DataChart.board.delete.table.title"),
+					DataChartBundle.message("DataChart.board.delete.single.message", card.getName()),
 					com.intellij.openapi.ui.Messages.getYesButton(),
 					com.intellij.openapi.ui.Messages.getNoButton());
 			if (!confirmed) {
@@ -1709,7 +1712,7 @@ public class KanbanBoard extends JPanel {
 		com.wd.db.TableNavigator.Result result =
 				com.wd.db.TableNavigator.performAction(project, info, actionId, this);
 		if (!result.isSuccess()) {
-			NotificationUtil.info("跳转失败", result.getMessage());
+			NotificationUtil.info(DataChartBundle.message("DataChart.notify.goTo.failed"), result.getMessage());
 		}
 		return result.isSuccess();
 	}
@@ -1762,8 +1765,8 @@ public class KanbanBoard extends JPanel {
 	private void applySyncedStructure(KanbanCard card, TableInfo old,
 									  String dsName, String tableName, TableInfo fresh) {
 		if (fresh == null) {
-			NotificationUtil.error("同步失败",
-					"无法获取表结构：" + tableName + "（数据源：" + dsName + "）");
+			NotificationUtil.error(DataChartBundle.message("DataChart.notify.sync.failed"),
+					DataChartBundle.message("DataChart.board.sync.failed.content", tableName, dsName));
 			return;
 		}
 		// 查询期间卡片可能已被删除，此时丢弃同步结果
@@ -1830,9 +1833,11 @@ public class KanbanBoard extends JPanel {
 
 		notifyBoardChanged();
 		repaint();
-		NotificationUtil.info("同步成功",
-				"已重新获取 " + tableName + "（" + fresh.getColumns().size() + " 列）"
-						+ (toRemove.isEmpty() ? "" : "，已移除 " + toRemove.size() + " 条失效连线"));
+		NotificationUtil.info(DataChartBundle.message("DataChart.notify.sync.success"),
+				DataChartBundle.message("DataChart.board.sync.success.content",
+								tableName, String.valueOf(fresh.getColumns().size()))
+						+ (toRemove.isEmpty() ? "" : DataChartBundle.message(
+								"DataChart.board.sync.success.removed", String.valueOf(toRemove.size()))));
 	}
 
 	/**

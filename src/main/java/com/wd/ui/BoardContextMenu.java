@@ -4,6 +4,7 @@ import com.intellij.ui.JBColor;
 import com.wd.db.ColumnInfo;
 import com.wd.db.TableInfo;
 import com.wd.db.TableNavigator;
+import com.wd.i18n.DataChartBundle;
 import com.wd.model.RelationType;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -103,16 +104,20 @@ public final class BoardContextMenu {
 		JPopupMenu menu = buildStyledPopupMenu();
 
 		// 关系类型子菜单（自绘父项，见 FlatMenu）
-		JMenu typeMenu = new FlatMenu("关系类型");
-		addRelationTypeItem(typeMenu, "一对一", RelationType.ONE_TO_ONE, conn, onRepaint, onNotifyChanged);
-		addRelationTypeItem(typeMenu, "一对多", RelationType.ONE_TO_MANY, conn, onRepaint, onNotifyChanged);
-		addRelationTypeItem(typeMenu, "多对一", RelationType.MANY_TO_ONE, conn, onRepaint, onNotifyChanged);
-		addRelationTypeItem(typeMenu, "多对多", RelationType.MANY_TO_MANY, conn, onRepaint, onNotifyChanged);
+		JMenu typeMenu = new FlatMenu(DataChartBundle.message("DataChart.menu.relation.type"));
+		addRelationTypeItem(typeMenu, DataChartBundle.message("DataChart.menu.relation.type.one.to.one"),
+				RelationType.ONE_TO_ONE, conn, onRepaint, onNotifyChanged);
+		addRelationTypeItem(typeMenu, DataChartBundle.message("DataChart.menu.relation.type.one.to.many"),
+				RelationType.ONE_TO_MANY, conn, onRepaint, onNotifyChanged);
+		addRelationTypeItem(typeMenu, DataChartBundle.message("DataChart.menu.relation.type.many.to.one"),
+				RelationType.MANY_TO_ONE, conn, onRepaint, onNotifyChanged);
+		addRelationTypeItem(typeMenu, DataChartBundle.message("DataChart.menu.relation.type.many.to.many"),
+				RelationType.MANY_TO_MANY, conn, onRepaint, onNotifyChanged);
 		menu.add(typeMenu);
 
 		menu.addSeparator();
 
-		JMenuItem deleteItem = buildStyledMenuItem("删除连线");
+		JMenuItem deleteItem = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.delete.connection"));
 		deleteItem.addActionListener(e -> onRemove.run());
 		menu.add(deleteItem);
 
@@ -170,19 +175,19 @@ public final class BoardContextMenu {
 		}
 		JPopupMenu menu = buildStyledPopupMenu();
 
-		JMenuItem copyName = buildStyledMenuItem("复制表名");
+		JMenuItem copyName = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.copy.tableName"));
 		copyName.addActionListener(e -> copyToClipboard(info.getName()));
 		menu.add(copyName);
 
 		String comment = info.getComment();
-		JMenuItem copyComment = buildStyledMenuItem("复制注释");
+		JMenuItem copyComment = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.copy.comment"));
 		copyComment.setEnabled(comment != null && !comment.isEmpty());
 		copyComment.addActionListener(e -> copyToClipboard(comment));
 		menu.add(copyComment);
 
 		if (onSyncStructure != null) {
-			JMenuItem syncItem = buildStyledMenuItem("同步表结构");
-			syncItem.setToolTipText("重新获取表结构信息");
+			JMenuItem syncItem = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.sync.structure"));
+			syncItem.setToolTipText(DataChartBundle.message("DataChart.menu.sync.structure.tooltip"));
 			syncItem.addActionListener(e -> onSyncStructure.run());
 			menu.add(syncItem);
 		}
@@ -194,7 +199,7 @@ public final class BoardContextMenu {
 			menu.addSeparator();
 		}
 		if (hasFindUsages) {
-			JMenuItem findUsagesItem = buildStyledMenuItem("查找用法");
+			JMenuItem findUsagesItem = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.find.usages"));
 			findUsagesItem.addActionListener(e -> navigateAction.run(TableNavigator.ACTION_FIND_USAGES));
 			menu.add(findUsagesItem);
 		}
@@ -204,10 +209,9 @@ public final class BoardContextMenu {
 
 		if (onDeleteTable != null) {
 			menu.addSeparator();
-			JMenuItem deleteItem = buildStyledMenuItem("删除表");
+			JMenuItem deleteItem = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.delete.table"));
 			deleteItem.setForeground(DELETE_FOREGROUND);
-			deleteItem.putClientProperty("MenuItem.selectionForeground", DELETE_FOREGROUND);
-			deleteItem.setToolTipText("删除该表（有连线时会先提示）");
+			deleteItem.setToolTipText(DataChartBundle.message("DataChart.menu.delete.table.tooltip"));
 			deleteItem.addActionListener(e -> onDeleteTable.run());
 			menu.add(deleteItem);
 		}
@@ -233,16 +237,18 @@ public final class BoardContextMenu {
 		}
 
 		// 与「关系类型」子菜单保持一致的样式
-		JMenu gotoMenu = new FlatMenu("跳转");
+		JMenu gotoMenu = new FlatMenu(DataChartBundle.message("DataChart.menu.go.to"));
 
 		if (hasDdl) {
-			gotoMenu.add(buildNavigateItem("跳到 DDL", TableNavigator.ACTION_OPEN_DDL, navigateAction));
+			gotoMenu.add(buildNavigateItem(DataChartBundle.message("DataChart.menu.go.to.ddl"),
+					TableNavigator.ACTION_OPEN_DDL, navigateAction));
 		}
 		if (hasData) {
-			gotoMenu.add(buildNavigateItem("查看数据", TableNavigator.ACTION_OPEN_DATA, navigateAction));
+			gotoMenu.add(buildNavigateItem(DataChartBundle.message("DataChart.menu.go.to.data"),
+					TableNavigator.ACTION_OPEN_DATA, navigateAction));
 		}
 		if (hasExplorer) {
-			gotoMenu.add(buildNavigateItem("在 Database Explorer 中定位",
+			gotoMenu.add(buildNavigateItem(DataChartBundle.message("DataChart.menu.go.to.database.explorer"),
 					TableNavigator.ACTION_SELECT_IN_DATABASE_VIEW, navigateAction));
 		}
 		return gotoMenu;
@@ -266,12 +272,12 @@ public final class BoardContextMenu {
 		}
 		JPopupMenu menu = buildStyledPopupMenu();
 
-		JMenuItem copyName = buildStyledMenuItem("复制列名");
+		JMenuItem copyName = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.copy.columnName"));
 		copyName.addActionListener(e -> copyToClipboard(col.getName()));
 		menu.add(copyName);
 
 		String comment = col.getComment();
-		JMenuItem copyComment = buildStyledMenuItem("复制注释");
+		JMenuItem copyComment = buildStyledMenuItem(DataChartBundle.message("DataChart.menu.copy.comment"));
 		copyComment.setEnabled(comment != null && !comment.isEmpty());
 		copyComment.addActionListener(e -> copyToClipboard(comment));
 		menu.add(copyComment);

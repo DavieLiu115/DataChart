@@ -2,6 +2,7 @@ package com.wd.ui;
 
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.DialogWrapper;
+import com.wd.i18n.DataChartBundle;
 import java.util.Objects;
 import javax.swing.ImageIcon;
 import javax.swing.JComponent;
@@ -28,10 +29,10 @@ public class Donation extends DialogWrapper {
 		super(project);
 		init();
 		setResizable(false);
-		setTitle("捐赠");
+		setTitle(DataChartBundle.message("DataChart.donation.title"));
 		//contentPanel.setPreferredSize(JBUI.size(300, 400));
-		donationLabel.setText("如果您觉得插件还不错，欢迎扫码捐赠支持作者,感谢您的支持!");
-		infoLabel.setText("插件定制开发，请联系邮箱:");
+		donationLabel.setText(DataChartBundle.message("DataChart.donation.description"));
+		infoLabel.setText(DataChartBundle.message("DataChart.donation.contact"));
 		emailText.setText("lerder@foxmail.com");
 		ImageIcon wx = new ImageIcon(Objects.requireNonNull(getClass().getResource("/icons/wx.jpg")));
 		//wx.setImage(wx.getImage().getScaledInstance(268, 365, Image.SCALE_DEFAULT));

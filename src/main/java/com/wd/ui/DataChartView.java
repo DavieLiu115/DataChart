@@ -8,6 +8,7 @@ import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.ui.DialogWrapper;
 import com.intellij.ui.JBColor;
 import com.intellij.ui.SearchTextField;
+import com.wd.i18n.DataChartBundle;
 import com.wd.icon.PluginIcons;
 import com.wd.model.ChartData;
 import com.alibaba.fastjson.JSON;
@@ -112,7 +113,7 @@ public class DataChartView extends DialogWrapper {
 	 */
 	private void setupToolBarButtons() {
 	if (focusButton != null) {
-		focusButton.setToolTipText("Recenter：保持当前缩放，只把画板内容重新居中到视口");
+		focusButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.recenter.tooltip"));
 		focusButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
 				kanbanBoard.focusView();
@@ -120,7 +121,7 @@ public class DataChartView extends DialogWrapper {
 		});
 	}
 	if (fitButton != null) {
-		fitButton.setToolTipText("缩放 + 居中：缩放到能完整显示所有卡片，再居中");
+		fitButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.fit.tooltip"));
 		fitButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
 				kanbanBoard.fitView();
@@ -132,7 +133,7 @@ public class DataChartView extends DialogWrapper {
 	//	fullScreamButton.addActionListener(e -> toggleFullScreen());
 	//}
 	if (oneOneButton != null) {
-		oneOneButton.setToolTipText("缩放到 100%（保持当前画板位置不动）");
+		oneOneButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.zoom100.tooltip"));
 		oneOneButton.addActionListener(e -> {
 			if (kanbanBoard != null) {
 				// 只重置缩放为 100%，不移动位置（职责与 Focus 正交）
@@ -141,11 +142,11 @@ public class DataChartView extends DialogWrapper {
 		});
 	}
 	if (exportPDFButton != null) {
-			exportPDFButton.setToolTipText("导出为 PDF 文件");
+			exportPDFButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.exportPdf.tooltip"));
 			exportPDFButton.addActionListener(e -> exportAsPdf());
 		}
 		if (exportPictureButton != null) {
-			exportPictureButton.setToolTipText("导出为图片（JPG）");
+			exportPictureButton.setToolTipText(DataChartBundle.message("DataChart.view.toolbar.exportImage.tooltip"));
 			exportPictureButton.addActionListener(e -> exportAsImage());
 		}
 		if (donateButton != null) {
@@ -207,12 +208,12 @@ public class DataChartView extends DialogWrapper {
 			return;
 		}
 		if (kanbanBoard.getCards() == null || kanbanBoard.getCards().isEmpty()) {
-			NotificationUtil.info("导出失败", "画板为空，无内容可导出");
+			NotificationUtil.info(DataChartBundle.message("DataChart.notify.export.failed"), DataChartBundle.message("DataChart.view.export.empty"));
 			return;
 		}
 		JFileChooser chooser = new JFileChooser();
-		chooser.setDialogTitle("导出为 PDF");
-		chooser.setFileFilter(new FileNameExtensionFilter("PDF 文件 (*.pdf)", "pdf"));
+		chooser.setDialogTitle(DataChartBundle.message("DataChart.view.export.pdf.chooserTitle"));
+		chooser.setFileFilter(new FileNameExtensionFilter(DataChartBundle.message("DataChart.view.export.pdf.filter"), "pdf"));
 		chooser.setSelectedFile(new File(generateDefaultFileName("pdf")));
 
 		if (chooser.showSaveDialog(rootPanel) == JFileChooser.APPROVE_OPTION) {
@@ -225,16 +226,17 @@ public class DataChartView extends DialogWrapper {
 			final File target = file;
 			// 2026-08-27 优化：PDF 编码 + 文件 IO 移到后台线程；
 			// Task.Modal 模态进度框会阻塞 EDT 交互，保证 board 状态不被修改（无竞态）
-			ProgressManager.getInstance().run(new Task.Modal(project, "导出 PDF", true) {
+			ProgressManager.getInstance().run(new Task.Modal(project, DataChartBundle.message("DataChart.view.export.pdf.progressTitle"), true) {
 				@Override
 				public void run(@NotNull ProgressIndicator indicator) {
 					indicator.setIndeterminate(true);
 					boolean ok = BoardExportUtil.exportToPdf(kanbanBoard, target);
 					ApplicationManager.getApplication().invokeLater(() -> {
 						if (ok) {
-							NotificationUtil.info("导出成功", "PDF 已保存到：" + target.getAbsolutePath());
+							NotificationUtil.info(DataChartBundle.message("DataChart.notify.export.success"),
+							DataChartBundle.message("DataChart.view.export.pdf.saved", target.getAbsolutePath()));
 						} else {
-							NotificationUtil.error("导出失败", "保存 PDF 失败，请查看日志");
+							NotificationUtil.error(DataChartBundle.message("DataChart.notify.export.failed"), DataChartBundle.message("DataChart.view.export.pdf.failed"));
 						}
 					});
 				}
@@ -252,12 +254,12 @@ public class DataChartView extends DialogWrapper {
 			return;
 		}
 		if (kanbanBoard.getCards() == null || kanbanBoard.getCards().isEmpty()) {
-			NotificationUtil.info("导出失败", "画板为空，无内容可导出");
+			NotificationUtil.info(DataChartBundle.message("DataChart.notify.export.failed"), DataChartBundle.message("DataChart.view.export.empty"));
 			return;
 		}
 		JFileChooser chooser = new JFileChooser();
-		chooser.setDialogTitle("导出为图片");
-		chooser.setFileFilter(new FileNameExtensionFilter("JPG 图片 (*.jpg)", "jpg", "jpeg"));
+		chooser.setDialogTitle(DataChartBundle.message("DataChart.view.export.image.chooserTitle"));
+		chooser.setFileFilter(new FileNameExtensionFilter(DataChartBundle.message("DataChart.view.export.image.filter"), "jpg", "jpeg"));
 		chooser.setSelectedFile(new File(generateDefaultFileName("jpg")));
 
 		if (chooser.showSaveDialog(rootPanel) == JFileChooser.APPROVE_OPTION) {
@@ -270,16 +272,17 @@ public class DataChartView extends DialogWrapper {
 			}
 			final File target = file;
 			// 2026-08-27 优化：大图创建（2.0 scale）+ JPEG 编码移到后台线程
-			ProgressManager.getInstance().run(new Task.Modal(project, "导出图片", true) {
+			ProgressManager.getInstance().run(new Task.Modal(project, DataChartBundle.message("DataChart.view.export.image.progressTitle"), true) {
 				@Override
 				public void run(@NotNull ProgressIndicator indicator) {
 					indicator.setIndeterminate(true);
 					boolean ok = BoardExportUtil.exportToImage(kanbanBoard, target, "jpg", 2.0);
 					ApplicationManager.getApplication().invokeLater(() -> {
 						if (ok) {
-							NotificationUtil.info("导出成功", "图片已保存到：" + target.getAbsolutePath());
+							NotificationUtil.info(DataChartBundle.message("DataChart.notify.export.success"),
+							DataChartBundle.message("DataChart.view.export.image.saved", target.getAbsolutePath()));
 						} else {
-							NotificationUtil.error("导出失败", "保存图片失败，请查看日志");
+							NotificationUtil.error(DataChartBundle.message("DataChart.notify.export.failed"), DataChartBundle.message("DataChart.view.export.image.failed"));
 						}
 					});
 				}
@@ -453,8 +456,8 @@ public class DataChartView extends DialogWrapper {
 			// 解析失败：提示用户，避免静默丢数据（保留空看板）
 			com.intellij.openapi.diagnostic.Logger.getInstance(DataChartView.class)
 					.warn("loadFromJson 解析 .datachart 失败", e);
-			NotificationUtil.error("打开文件失败",
-					"无法解析该 .datachart 文件，已显示空看板。\n" + e.getMessage());
+			NotificationUtil.error(DataChartBundle.message("DataChart.notify.open.failed"),
+					DataChartBundle.message("DataChart.view.open.failed.content") + e.getMessage());
 		}
 	}
 
@@ -593,9 +596,10 @@ public class DataChartView extends DialogWrapper {
 		updateSearchStatusLabel();
 		if (count == 0) {
 			// 无命中，给个轻量提示
-			searchTextField.setToolTipText("未找到匹配项");
+			searchTextField.setToolTipText(DataChartBundle.message("DataChart.view.search.noMatch"));
 		} else {
-			searchTextField.setToolTipText("找到 " + count + " 条匹配项，↑/↓ 切换，Esc 清除");
+			searchTextField.setToolTipText(
+					DataChartBundle.message("DataChart.view.search.matches", String.valueOf(count)));
 		}
 	}
 
