@@ -17,7 +17,26 @@
     <!-- Description of the plugin displayed on the Plugin Page and IDE Plugin Manager.
          Simple HTML elements (text formatting, paragraphs, and lists) can be added inside of <![CDATA[ ]]> tag.
          Guidelines: https://plugins.jetbrains.com/docs/marketplace/plugin-overview-page.html#plugin-description -->
-    <description>%DataChart.plugin.description</description>
+    <description><![CDATA[
+    <b>DataChart</b> is a plugin that visualizes database table structures on an interactive board.<br>
+    <ul>
+      <li>Drag database tables from the Database tool window onto the canvas to generate table-structure cards (columns, types, comments, primary-key / index markers)</li>
+      <li>Draw connections to express relationships between tables (one-to-one / one-to-many / many-to-one / many-to-many)</li>
+      <li>Supports canvas pan / zoom / snap alignment, card search, and table-structure synchronization</li>
+      <li>Export the ER diagram to PDF or image, with dark / light theme adaptation</li>
+    </ul>
+    Board layout and table relationships are saved in a <b>.datachart</b> file.
+    <hr>
+
+    DataChart 是一个数据库表结构可视化看板插件。<br>
+    <ul>
+      <li>从 Database 工具窗口拖入数据库表，在画布上生成表结构卡片（字段、类型、注释、主键/索引标识）</li>
+      <li>通过连线表达表之间的关联关系（一对一 / 一对多 / 多对一 / 多对多）</li>
+      <li>支持画布平移 / 缩放 / 对齐磁吸、卡片搜索、同步表结构</li>
+      <li>可将 ER 图导出为 PDF 或图片，支持深色 / 浅色主题适配</li>
+    </ul>
+    使用 <b>.datachart</b> 文件保存看板布局与表关系。
+  ]]></description>
 
     <!-- Product and plugin compatibility requirements.
          Read more: https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html -->
