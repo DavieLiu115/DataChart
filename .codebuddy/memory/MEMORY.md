@@ -1,11 +1,13 @@
 # MEMORY（DataChart 项目长期记忆）
 
+> 详细规范看 `DEVELOPMENT_GUIDE.md`，按需查阅下面各条指向的章节。
+
 ## 核心架构
 - IntelliJ IDEA 插件，自定义 `.datachart` 文件类型（`com.wd.editor.*`）
 - 画板核心：`KanbanBoard`（编排层）+ 工具类（`BoardPersistence` / `BoardExportUtil` / `BoardContextMenu` / `BoardSnapHelper` / `BoardSearchModel` / `BoardViewport` / `NotificationUtil`）
 - 数据模型：`com.wd.model`（ChartData / TableCardModel / ChartRelation / RelationType）
 - DB 元信息反射：`com.wd.db.DatabaseTableMetadataFetcher`（全反射访问 `com.intellij.database.*`）
-- 表跳转：`com.wd.db.TableNavigator`（复用 Database 原生能力，见第 10 条）
+- 表跳转：`com.wd.db.TableNavigator`（复用 Database 原生能力，见"第 10 条"）
 
 ## 项目约定
 - **不要写死用户可见文案（用户明确要求）**：菜单项 / tooltip / 通知 / 对话框一律走
@@ -38,76 +40,35 @@
 
 ## 关键设计决策
 
-### 1. 卡片 ID 必须是 UUID（2026-08-07）
-- 拖入重复表时 `TableInfo.setId(UUID.randomUUID().toString())` 覆盖默认 `schema.table` 拼接
-- 加载旧 .datachart 时 `KanbanBoard.loadFromChartData` 检测重复 id 并补 UUID
-- 详细：DEVELOPMENT_GUIDE.md 第 35 节 / memory/2026-08-07.md
+### 1~6 基础约定
+- **卡片 ID 用 UUID**：拖入重复表时 `TableInfo.setId(UUID.randomUUID())` 覆盖 `schema.table` 拼接；加载旧文件时检测重复 id 补 UUID（35 节）。
+- **连线列定位用列名**：`ChartRelation.from/toColumnName` 存列名，删除列后仍准确；`BoardPersistence.resolveRowIndex` 优先列名 → 回退 index。**列 index 在表结构变化后必须用列名重定位**。
+- **卡片宽度固定 280**：注释过长按宽度截断 + `...`（22 节）。
+- **位置保留用户拖动结果**：加载时保留 `model.x/y` 只修正尺寸；新建卡片从 (0,0) 平铺，4 张/行（26 节）。
+- **默认关系类型**：`RelationType.ONE_TO_ONE` 作默认，旧文件 UNKNOWN 也回退（29 节）。
+- **扩展名常量**：`DataToolsFileType.EXTENSION = "datachart"`，不要硬编码（9 节）。
 
-### 2. 连线列定位用列名（2026-08-03）
-- `ChartRelation.fromColumnName/toColumnName` 存列名，删除列后仍准确
-- `BoardPersistence.resolveRowIndex` 优先按列名 → 回退列 index
+### 7~9 布局与尺寸（共同教训：同步/ 零值）
+- **视口状态不在 JSON 中持久化**：每次打开都重置 viewport，靠 `focusView` 居中；IDE 重启自动重开时 `getComponent` 同步链路触发 `loadFromJson`，panel 尚未完成布局（37 节）。
+- **同步链路调 Swing 必须做零值防御**：`getComponent` → `loadFromJson` → `focusView` 全同步，此时 `getVisibleRect()/getSize()` 可能为 0。**`invokeLater` 不等于"等布局完成"**，`focusOn` 类算法必须校验 viewWidth。
+- **卡片高度公式三处共享静态常量**（39 节）：`KanbanBoard.addTableCard`（新建）+ `loadFromChartData`（加载）+ `KanbanCard.updateTableInfo`（同步）统一用 `KanbanCard.HEADER_HEIGHT(28)`/`ROW_HEIGHT(18)`/`PADDING(10)`，`height = HEADER + 列数×ROW + PADDING`；历史上 `TABLE_CARD_BASE_HEIGHT` 写死 60 与 `drawTableCard` 实际 38 不对齐，导致底部 ~22px 空白行。
 
-### 3. 卡片宽度固定 280（2026-08-01，22 节）
-- 所有表统一宽度，注释过长按宽度截断 + `...`
-
-### 4. 卡片位置保留用户拖动结果（2026-08-01，26 节）
-- 加载时保留 `model.x/y`，只修正尺寸
-- 新建卡片从 (0, 0) 平铺，4 张/行
-
-### 5. 默认关系类型一对一（2026-08-03，29 节）
-- `RelationType.ONE_TO_ONE` 替代 UNKNOWN 作默认
-- 旧文件加载时 UNKNOWN 也回退到 ONE_TO_ONE
-
-### 6. 文件扩展名统一常量（DEVELOPMENT_GUIDE 第 9 条）
-- `DataToolsFileType.EXTENSION = "datachart"`，不要硬编码
-
-## 审查结论（2026-08-07 全项目）
-### Connection.sourceRow/targetRow 可重定位
-- 已从 `final` 放开为可变，新增 `setSourceRow/setTargetRow`
-- 用途：`syncTableStructure` 同步表结构后用列名重新定位连线行，防止列 index 错位
-- 教训：**所有引用"列 index"的地方在表结构变化后都要用列名重定位**
-
-### 已知待确认项（未修）
-- `DataChartEditor.dispose()` 关闭时 `if (modified) saveDocument()` 强制落盘，可能绕过 IDE 未保存确认
-
-### 7. 视口状态不在 JSON 中持久化（2026-08-07 已知）
-- 每次打开 .datachart 都重置 viewport，依赖 `focusView` 把卡片居中
-- IDE 重启自动重开时 `getComponent` 同步链路触发 `loadFromJson`，panel 还没真正完成布局
-- 修复见 DEVELOPMENT_GUIDE 第 37 节 / memory/2026-08-07.md
-- 教训：**`invokeLater` 不等于"等组件布局完成"**；**focusOn 类算法必须 viewWidth 零值校验**
-
-### 8. 关键设计陷阱：同步链路调 Swing 方法
-- `FileEditor.getComponent` 同步链路 → `ensureInitialized` → `loadFromJson` → `focusView` 都同步执行
-- 但 IDE 此时还没把 panel 加入可见容器，`getVisibleRect()` 返回 0
-- 所有依赖 `getVisibleRect`/`getSize` 的方法必须有零值防御或异步等待布局完成
-
-### 9. 卡片高度公式三处必须共享静态常量（2026-08-20）
-- 三处计算位置：`KanbanBoard.addTableCard`（新建）+ `KanbanBoard.loadFromChartData`（加载）+ `KanbanCard.updateTableInfo`（同步表结构）
-- 必须共用 `KanbanCard.HEADER_HEIGHT(28)` / `ROW_HEIGHT(18)` / `PADDING(10)` 这套静态常量，算出 `height = HEADER_HEIGHT + 列数×ROW_HEIGHT + PADDING`
-- 教训：`KanbanBoard.TABLE_CARD_BASE_HEIGHT` 历史上写死成 60（= 28+10+22 多余空白），与 `drawTableCard` 实际公式 38 不对齐，导致 20 列的表底部留 ~22px 空白行
-- 详见 DEVELOPMENT_GUIDE 第 39 节 / memory/2026-08-20.md
+### 其他审查结论
+- `Connection.sourceRow/targetRow` 已从 `final` 放开（`setSourceRow/setTargetRow`），用于 `syncTableStructure` 后按列名重定位连线行。
+- **待确认（未修）**：`DataChartEditor.dispose()` 关闭时 `if (modified) saveDocument()` 强制落盘，可能绕过 IDE 未保存确认。
 
 ### 10. 借用 Database 插件原生 Action 实现"跳转"（2026-09-21 已实现并编译通过）
-- IDEA 的 ER 图（Diagrams）右键菜单里的 `Go To > Data / Go to DDL / Database Explorer` **不是自己写的跳转逻辑**，而是把现成 Action 组装成 ActionGroup（uml 框架 `DiagramSourceActionsGroup` + Database 的 `DbDiagramProvider$2$1.getChildren()` 用 `ActionManager.getAction(id)` 取）。
-- 可复用的 action id：`Jdbc.OpenEditor.Data`（Data/Edit Data）、`Jdbc.OpenEditor.DDL`（Go to DDL）、`sql.SelectInDatabaseView`（Database Explorer）、`FindUsages`、`$Copy`、`CopyReference`。
-- 它们只认 `CommonDataKeys.PSI_ELEMENT`，所以只需自建 `DataContext`：
-  `AnActionEvent.createFromDataContext(ActionPlaces.POPUP, action.getTemplatePresentation().clone(), SimpleDataContext.builder().add(CommonDataKeys.PROJECT, p).add(CommonDataKeys.PSI_ELEMENT, dbElement).build())` → `action.update(event)` 判 enable → `action.actionPerformed(event)`。
-- 解析 PSI 元素链路（反射）：`DbPsiFacade.getInstance(project)` → `findDataSource(name)` → `DasUtil.getTables(ds)` 匹配同名 → `DbPsiFacade.findElement(DasObject)` → `DbElement`（`extends PsiFileSystemItem`，即 PsiElement）。
-- **不要持久化 PSI 元素**（重启/同步后失效），右键时用 `TableInfo` 的 datasource+schema+tableName 现场重解析。
-- 两个坑：① 组 `DbDiagrams.SourceActionsGroup.GoTo` 继承 `DiagramSourceActionsGroup`，其 `update()` 要求 DataContext 有 `DiagramDataKeys.BUILDER` 且有选中节点，否则整组被禁用 → 必须自建 `DefaultActionGroup`；② `ActionPopupMenu.setDataContext(Supplier)` 在 2023.2 可用，`ActionPlaces` 无 `CONTEXT_MENU` 常量（用 `POPUP`）。
+- **原理**：ER 图右键的 `Go To > Data / DDL / Database Explorer` 不是自研跳转，而是把现成 Action 用 `ActionManager.getAction(id)` 组装成 ActionGroup。
+- **可复用 action id**：`Jdbc.OpenEditor.Data`（Edit Data）、`Jdbc.OpenEditor.DDL`、`sql.SelectInDatabaseView`、`FindUsages`、`$Copy`、`CopyReference`。
+- 它们只认 `CommonDataKeys.PSI_ELEMENT`，故自建 `DataContext`：`AnActionEvent.createFromDataContext(ActionPlaces.POPUP, templatePresentation.clone(), SimpleDataContext.builder().add(CommonDataKeys.PROJECT, p).add(CommonDataKeys.PSI_ELEMENT, elem).build())` → `action.update(event)` 判 enable → `action.actionPerformed(event)`。
+- **PSI 解析链路**（反射）：`DbPsiFacade.getInstance(project)` → `findDataSource(name)` → `DasUtil.getTables(ds)` 匹配同名 → `DbPsiFacade.findElement(DasObject)` → `DbElement`（`extends PsiFileSystemItem`）。**PSI 元素不要持久化**（重启/同步后失效），右键时用 `TableInfo` 的 datasource+schema+tableName 现场重解析。
+- 坑：`DbDiagrams.SourceActionsGroup.GoTo` 的 `update()` 要求 `DiagramDataKeys.BUILDER` + 选中节点，否则整组禁用 → 必须自建 `DefaultActionGroup`；`ActionPlaces` 无 `CONTEXT_MENU`（用 `POPUP`）。
 - 已实现（2026-09-21）：`DatabaseTableMetadataFetcher.resolveDbElement`（反射 `DbPsiFacade.findElement(DasObject)`）+ 新类 `com.wd.db.TableNavigator.performAction/isActionAvailable` + `BoardContextMenu.buildHeaderMenu` 第 4 参 `NavigateAction`（生成「跳转」JMenu 子菜单）+ `KanbanBoard.navigateToTable`。`./gradlew compileJava` 通过。
-- **实测坑：`PSI_ELEMENT_ARRAY` 的正确归属是 `PlatformCoreDataKeys.PSI_ELEMENT_ARRAY`**（`LangDataKeys` 继承自它，通过子类访问也能解析）；写成 `CommonDataKeys.PSI_ELEMENT_ARRAY` 编译报"找不到符号"（首次编译就踩了这个）。
-- **实测坑（selector 类 Action 不可用）**：`sql.SelectInDatabaseView` 的 `update()` 要求 `SelectInContext.getVirtualFile()` 是 Database 文件系统虚拟文件（`DbImplUtil.isDatabaseVirtualFile`），合成 `AnActionEvent` 必然被置灰 → 改为**直连反射调用 `com.intellij.database.view.DatabaseView.select(PsiElement, boolean)`**（静态方法，public），绕开 `SelectInContext`/`canSelect`。
-- `resolveDbElement` 三级兜底：数据源松散匹配（忽略大小写/`@host`）→ `DbDataSource.getNameIndex().getObjectsByNameInsensitive` 查表 → `DbDataSource.findElement(DasObject)`/`DbPsiFacade.findElement`（**必须精确签名**，`DbDataSource` 还有 `findElement(ObjectPath)` 重载）。
-- 全部反射目标已在 build 241 上复核；`performAction` 返回带原因的 `Result` 便于定位失败环节。
-- **「查找用法」= 平台 `FindUsages` 动作**（Database 插件无自己的实现）。2024.1 的 `FindUsagesAction` **只认 `UsageView.USAGE_TARGETS_KEY` / `FindUsagesAction.SEARCH_TARGETS` / 编辑器光标，不读 `PSI_ELEMENT`** → 必须补
-  `UsageView.USAGE_TARGETS_KEY = { new PsiElement2UsageTargetAdapter(element, true) }`（`ReadAction` 中构造；单参构造器在 241 已 forRemoval 弃用）+ `CONTEXT_COMPONENT` 作为弹窗锚点。恰好 1 个目标时才会直接查找（等价 Alt+F7）。
-- **popup place 下不可用的动作是"隐藏"而非"置灰"**（`FindUsagesInFileAction.updateFindUsagesAction` 里 `setVisible(enabled || !isPopupPlace(place))`）。
-- **菜单项不要显示快捷键提示**（2026-09-21 用户要求去掉）：`JMenuItem.setAccelerator` 在弹窗菜单里只展示不生效，会误导用户；等真用 `registerKeyboardAction` 注册后再加。
-- **菜单 hover 整行变粉（macOS 系统强调色）→ 必须完全自绘**：IntelliJ 的菜单 UI（`com.intellij.ui.plaf.beg.BegMenuItemUI` / `IdeaMenuUI`）在 `installDefaults()` 里用
-  `selectionBackground = JBColor.namedColor("Menu.selectionBackground", UIUtil.getListSelectionBackground(true))` **覆盖** Swing 字段，且 `JBColor.namedColor` 结果**全局缓存** →
-  `UIManager.put(...)` 与 client property 全部无效；`IdeaMenuUI.fillBackground()` 的 hover 填充还不受 `isOpaque()` 控制（`setOpaque(false)` 也不是万能开关）。
-  **唯一可靠解**：`BoardContextMenu` 的 `FlatMenuItem` / `FlatMenu` / `FlatCheckBoxMenuItem` 三个自绘类，`paintComponent` 内**不调用 `super`**，共用 `paintMenuRow(...)` +
-  `menuRowPreferredSize(...)`，配色只用 `JBColor`（hover 蓝 `#2470B0`/`#4A90E2`、禁用灰 `#9E9E9E`/`#808080`、危险红 `#C62828`/`#FF6B6B`）；自绘后**必须自己重写 `getPreferredSize()`**。
-  详见 DEVELOPMENT_GUIDE 第 46 节。
-- 详细调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
+- **实测坑**：`PSI_ELEMENT_ARRAY` 归属 `PlatformCoreDataKeys.PSI_ELEMENT_ARRAY`，写成 `CommonDataKeys.*` 编译报找不到符号。
+- **selector 类 Action 不可用**：`sql.SelectInDatabaseView.update()` 要求 `SelectInContext.getVirtualFile()` 是 Database 虚拟文件，合成事件必被置灰 → 改为反射直调 `com.intellij.database.view.DatabaseView.select(PsiElement, boolean)`（静态 public）。
+- `resolveDbElement` 三级兜底：数据源松散匹配（忽略大小写/`@host`）→ `DbDataSource.getNameIndex().getObjectsByNameInsensitive` → `DbDataSource.findElement(DasObject)`/`DbPsiFacade.findElement`（**签名必须精确**）。全部反射目标已在 build 241 复核；`performAction` 返回带原因的 `Result`。
+- **「查找用法」= 平台 `FindUsages` 动作**（Database 插件无实现）。2024.1 的 `FindUsagesAction` **不读 `PSI_ELEMENT`**，只认 `UsageView.USAGE_TARGETS_KEY` / `FindUsagesAction.SEARCH_TARGETS` / 编辑器光标 → 必须补 `UsageView.USAGE_TARGETS_KEY = { new PsiElement2UsageTargetAdapter(element, true) }`（`ReadAction` 内构造）+ `CONTEXT_COMPONENT` 作锚点；恰好 1 个目标才直接查找（等价 Alt+F7）。
+- **popup place 下不可用动作是"隐藏"而非"置灰"**（`FindUsagesInFileAction.updateFindUsagesAction`）。
+- **菜单项不要显示快捷键提示**（用户要求）：`JMenuItem.setAccelerator` 在弹窗菜单只展示不生效，会误导用户。
+- **菜单 hover 整行变粉（macOS 强调色）→ 必须完全自绘**：IntelliJ 的 `BegMenuItemUI`/`IdeaMenuUI` 在 `installDefaults()` 用 `JBColor.namedColor(...)` 覆盖 `selectionBackground` 且**全局缓存**，`UIManager.put` 与 client property 全部无效，`IdeaMenuUI.fillBackground()` 的 hover 填充也不受 `isOpaque()` 控制。**唯一可靠解**：`BoardContextMenu` 的 `FlatMenuItem`/`FlatMenu`/`FlatCheckBoxMenuItem` 自绘（`paintComponent` 不调 `super`），共用 `paintMenuRow`/`menuRowPreferredSize`，配色只用 `JBColor`，并自己重写 `getPreferredSize()`（46 节）。
+- 调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节

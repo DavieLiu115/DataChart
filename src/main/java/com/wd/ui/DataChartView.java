@@ -219,7 +219,7 @@ public class DataChartView extends DialogWrapper {
 		if (kanbanBoard == null || searchTextField == null) {
 			return;
 		}
-		int modifiers = java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+		int modifiers = java.awt.Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
 		KeyStroke findStroke = KeyStroke.getKeyStroke(KeyEvent.VK_F, modifiers);
 		kanbanBoard.registerKeyboardAction(e -> focusSearchField(),
 				"FocusSearchField", findStroke, JComponent.WHEN_IN_FOCUSED_WINDOW);

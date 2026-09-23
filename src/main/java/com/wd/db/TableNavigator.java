@@ -222,9 +222,19 @@ public final class TableNavigator {
 
 		// update() 内部通常也要读 PSI，包在 read action 中；
 		// actionPerformed() 放到 read action 外面执行（它可能触发写操作 / 弹窗）
+		//
+		// 关于 AnAction.update() 的 @ApiStatus.OverrideOnly 告警：
+		//   update() 的本意是"只由平台调用、由动作自己覆写"，但本场景正是平台内部的用法——
+		//   在**合成的** DataContext 上主动询问动作是否可用，再决定执行还是提示"当前不可用"。
+		//   平台没有暴露无副作用的等价公共入口：
+		//     - ActionUtil.lastUpdateAndCheckDumb(...) 会先 commitDocumentsIfNeeded()（有落盘副作用）；
+		//     - ActionUtil.performDumbAwareUpdate(...) 内含 ActionUpdateThread 断言，
+		//       跨线程调用可能被判定为非法（异常后功能就会退化成"动作执行失败"）。
+		//   因此保留直接调用，仅对这条 inspection 做行级抑制。
 		boolean enabled;
 		try {
 			enabled = ReadAction.compute(() -> {
+				//noinspection OverrideOnly
 				action.update(event);
 				return event.getPresentation().isEnabled();
 			});

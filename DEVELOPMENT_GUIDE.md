@@ -1307,3 +1307,95 @@ unzip -l <plugin jar> | grep messages/                    # 资源必须位于 c
 unzip -p <plugin jar> META-INF/plugin.xml | grep -n "resource-bundle\|%DataChart"
 ```
 
+---
+
+### 48. 废弃 AWT API：`getMenuShortcutKeyMask()` → `getMenuShortcutKeyMaskEx()`（2026-09-23）
+
+#### 现象
+IDE 的 "Deprecated API usage" inspection 在 `DataChartView.setupFindShortcut()` 上报：
+```
+Deprecated method java.awt.Toolkit.getMenuShortcutKeyMask() : int is invoked
+```
+
+#### 原因与修法
+- `Toolkit.getMenuShortcutKeyMask()` 自 **Java 10 起 `@Deprecated`**，因为老版本返回的是**旧式修饰符**
+  （`InputEvent.CTRL_MASK` / `META_MASK`），而 KeyStroke、HiDPI、多键位场景需要**扩展修饰符**
+  （`CTRL_DOWN_MASK` / `META_DOWN_MASK`）。
+- 替代：`Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()`，Java 10+ 可用，项目源码级别是
+  Java 17，直接替换即可，**不需要按平台分支**。
+
+```java
+// ❌ 废弃
+int modifiers = Toolkit.getDefaultToolkit().getMenuShortcutKeyMask();
+// ✅
+int modifiers = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+KeyStroke findStroke = KeyStroke.getKeyStroke(KeyEvent.VK_F, modifiers);
+```
+
+#### 注意
+- 两个方法**返回值都是 `int`**，`KeyStroke.getKeyStroke(int keyCode, int modifiers)` 签名不变，
+  所以替换是**纯字符级**的，不会牵连调用点（Mac 上得到 ⌘F，Win/Linux 得到 Ctrl+F）。
+- 同类"已废弃但返回值同为 int"的还有 `InputEvent.getModifiers()`（应用 `getModifiersEx()` 需注意语义不同，
+  后者才算扩展位），遇到时先确认**是否真的是同义替换**再改，不要机械替换。
+- 排查同类问题：在 IDE 里对 `java.awt.*` / 反射调用点开 **Inspection「Deprecated API usage」**，
+  或用 `grep -rn "getMenuShortcutKeyMask\|\.getModifiers()" src/` 扫一遍。
+- 改完后按惯例 `./gradlew compileJava` 验证（本次通过，无新增告警）。
+
+---
+
+### 49. `@ApiStatus.OverrideOnly` 告警：`AnAction.update()` 主动调用的权衡（2026-09-23）
+
+#### 现象
+inspection 在 `TableNavigator.performDatabaseAction()` 的内层 lambda 上报：
+```
+Override-only method com.intellij.openapi.actionSystem.AnAction.update(AnActionEvent)
+is invoked ... This method is marked with @org.jetbrains.annotations.ApiStatus.OverrideOnly
+```
+
+#### 背景：为什么这里必须调 `update()`
+本插件在 `BoardContextMenu` 点击「跳转」后，需要用**自建的 `DataContext`**（只有 PSI 元素）
+构造 `AnActionEvent`，然后：
+1. `action.update(event)` → 读 `event.getPresentation().isEnabled()` 判断可用性；
+2. 可用才 `action.actionPerformed(event)`，不可用则给出「该动作在当前上下文不可用」的提示。
+
+`update()` 是动作**唯一**能刷新自身 presentation 状态的入口，所以要判断可用性就绕不开它。
+`@ApiStatus.OverrideOnly` 的本意是「只该由平台调用、由动作自己覆写」，但本场景恰恰是平台内部的用法。
+
+#### 为什么不换成 `ActionUtil` 里的现成方法（已 `javap` 核实）
+| 候选 | 结论 |
+| --- | --- |
+| `ActionUtil.lastUpdateAndCheckDumb(action, event, boolean)` | 内部第一步就是 `commitDocumentsIfNeeded(action, event)` —— **会提交文档/落盘**，副作用不可接受 |
+| `ActionUtil.performDumbAwareUpdate(action, event, boolean)` | 内含 `getActionUpdateThread()` + `ActionUpdateThread` 断言（字节码里能看到 `old_only` / `fast_only` / `force throw` 等诊断字符串），**跨线程调用可能被判定非法** → 异常被 catch 后会退化成「动作执行失败」 |
+| `ActionUtil.doPerformActionOrShowPopup(...)` | 该类方法标了 `@ApiStatus.Internal`，用途也不同 |
+
+结论：**没有无副作用的公共等价入口**，强行替换会引入真实回归风险。
+
+#### 处理方式
+保留直接调用，用**行级抑制**并写清理由：
+
+```java
+enabled = ReadAction.compute(() -> {
+    //noinspection OverrideOnly
+    action.update(event);
+    return event.getPresentation().isEnabled();
+});
+```
+
+```java
+// update() 的本意是"只由平台调用、由动作自己覆写"，但本场景正是平台内部的用法——
+// 在合成的 DataContext 上主动询问动作是否可用，再决定执行还是提示"当前不可用"。
+// 平台没有暴露无副作用的等价公共入口（见 DEVELOPMENT_GUIDE 第 49 节），故保留调用并抑制。
+```
+
+#### 通用原则
+遇到 `@ApiStatus.OverrideOnly` / `@ApiStatus.Internal`：
+1. 先找**平台是否有公开的等价入口**（`ActionUtil` / `ActionManagerEx` / `***Util` 工具类）；
+2. 有则替换（如第 48 节 `getMenuShortcutKeyMaskEx` 那样是纯替换）；
+3. 没有、且替换会改变语义或引入副作用时，**保留调用 + `//noinspection` + 注释写明"为什么不换"**，
+   比机械替换后靠 catch 兜底更可靠 —— 注释是给下一次"想优化它的人"看的。
+4. 判断候选方法是否可用时，直接 `javap -c -p -classpath <jar> <class>` 看字节码里真正调了什么，
+   比看名字猜语义靠谱（本次就是靠它发现 `lastUpdateAndCheckDumb` 会提交文档）。
+
+> 注意：`//noinspection OverrideOnly` 是给 IDE 的 inspection 用的，**不影响编译**；
+> `./gradlew compileJava` 本来就只报 deprecation 之类，不报 OverrideOnly。
+
