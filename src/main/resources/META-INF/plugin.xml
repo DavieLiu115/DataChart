@@ -62,6 +62,10 @@
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
         <fileEditorProvider implementation="com.wd.editor.DataChartTextEditorProvider"/>
 
+        <!-- 抑制平台默认文本编辑器对 .datachart 生效：它的 Tab 也叫 "Text"，
+             会与插件自己实现的 JSON 高亮 Text Tab 重名（HIDE_DEFAULT_EDITOR 挡不住它） -->
+        <fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
+
         <internalFileTemplate name="DataChart"/>
 
         <projectService serviceImplementation="com.wd.db.TableMetadataService"/>

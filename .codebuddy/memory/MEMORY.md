@@ -79,8 +79,13 @@
 ### 11. `.datachart` 编辑器双 Tab：图形 Board + 自研 JSON Text（2026-09-24）
 - **用户偏好（明确要求）**：**不要**把 `.datachart` 的 fileType 语言改成 JSON（保留自定义语言类 `com.wd.editor.DataChart`，
   Board 行为不变）；Text Tab 的 JSON 高亮/格式化要**自己实现**，参考 `/Users/lww/Desktop/workspace/YamlHelper`（`MyEditorFactory`）。
-- 两个 Tab 都由插件提供：`DataChartEditorProvider`（policy `HIDE_DEFAULT_EDITOR`，同时隐藏平台默认文本编辑器以免两个同名 "Text"）
+- 两个 Tab 都由插件提供：`DataChartEditorProvider`（policy `HIDE_DEFAULT_EDITOR`）
   + `DataChartTextEditorProvider`（policy `NONE`）。**Tab 顺序 = plugin.xml 的 `fileEditorProvider` 声明顺序**（Board 先声明）。
+- **`HIDE_DEFAULT_EDITOR` 挡不住平台文本编辑器**（反编译 `FileEditorProviderManagerImpl.postProcessResult`：
+  谓词是 `it is DefaultPlatformFileEditorProvider`）；那个多出来的 "Text" Tab 来自独立 EP 注册的
+  `PsiAwareTextEditorProvider`（`id="text-editor" order="first"`）。→ 用 `FileEditorProviderSuppressor`
+  （EP `fileEditorProviderSuppressor`，`isSuppressed(Project, VirtualFile, FileEditorProvider)` **带文件参数**）
+  只对 .datachart 抑制 `instanceof TextEditorProvider`；⚠️ 该 EP 全局注册，实现里必须自己按文件类型过滤。
 - Tab 名走 i18n：`DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.tab.text`（Text / 文本）。
 - JSON 高亮做法：`new LightVirtualFile(name + ".json", JsonFileType.INSTANCE, text)` → 优先 `PsiManager.findFile` +
   `PsiDocumentManager.getDocument`（要 PSI，Ctrl+Alt+L 格式化/校验/Structure View 才可用；失败退回 `EditorFactory.createDocument`）

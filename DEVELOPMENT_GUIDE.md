@@ -1548,3 +1548,37 @@ editor = EditorFactory.getInstance().createEditor(document, project, lightFile, 
 `CodeStyle.getSettings(project).getCommonSettings(JsonLanguage.INSTANCE)`（即 IDE 里 JSON 的代码风格），
 所以「插件保存出的 JSON」与「Text Tab 里 Ctrl+Alt+L 的结果」风格一致，不会来回抖。
 
+#### 坑：多出来的第二个 "Text" Tab（2026-09-24）
+
+**现象**：打开 .datachart 出现 `Board | Text | Text` 三个 Tab。
+
+**根因**：`FileEditorPolicy.HIDE_DEFAULT_EDITOR` **挡不住平台文本编辑器**。
+反编译 `FileEditorProviderManagerImpl.postProcessResult` 可见它的谓词是
+`it is DefaultPlatformFileEditorProvider` —— 只能移除「默认编辑器」这一个 provider；
+而那个 "Text" Tab 其实来自**独立 EP 注册**的 `PsiAwareTextEditorProvider`
+（`META-INF/LangExtensions.xml` 里 `id="text-editor" order="first"`，继承 `TextEditorProvider`），
+它对所有非二进制文件都 accept，policy 管不到它。
+
+**解法**：用 `FileEditorProviderSuppressor`（EP `com.intellij.fileEditorProviderSuppressor`）：
+
+```xml
+<fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
+```
+
+```java
+public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
+                            @NotNull FileEditorProvider provider) {
+    // 只对 .datachart 抑制平台文本编辑器；插件自己的 Board / Text provider 不受影响
+    return DataToolsFileType.EXTENSION.equalsIgnoreCase(file.getExtension())
+            && provider instanceof TextEditorProvider;
+}
+```
+
+⚠️ 关键点：这个接口**带 project / file 参数**（不是只有 provider），所以能精准到文件类型；
+但 EP 本身是全局注册的，**实现里必须自己按文件过滤**，否则会把所有文件的文本编辑器都干掉。
+⚠️ 抑制后 `.datachart` 不再有平台 Document（`FileDocumentManager.getDocument(file)` 返回 null），
+`EditorFileSync.writeContent` 的「同步 Document」分支与 `prettifyFileIfNeeded` 的
+`isDocumentUnsaved` 检查会自然跳过，逻辑依旧安全（保留作为兜底）。
+⚠️ 教训：平台的「默认编辑器」有两条链路（`DefaultPlatformFileEditorProvider` 与
+`TextEditorProvider` 系），`FileEditorPolicy` 只能影响前者；要精准干掉某个 provider，用 suppressor。
+
