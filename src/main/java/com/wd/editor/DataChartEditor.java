@@ -17,7 +17,9 @@ import com.intellij.ui.tabs.JBTabsFactory;
 import com.intellij.ui.tabs.JBTabsPosition;
 import com.intellij.ui.tabs.TabInfo;
 import com.intellij.ui.tabs.TabsListener;
+import com.intellij.util.messages.MessageBusConnection;
 import com.wd.i18n.DataChartBundle;
+import com.wd.i18n.DataChartLanguage;
 import com.wd.model.ChartJsonUtil;
 import com.wd.ui.DataChartView;
 import com.wd.ui.NotificationUtil;
@@ -58,6 +60,14 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	private final EditorFileSync fileSync;
 	/** 平台内置 Save All（Cmd/Ctrl+S）时补位保存画布（2026-09-24 新增） */
 	private final EditorSaveAllHook saveAllHook;
+
+	/**
+	 * 插件语言切换（工具栏 EN / 中文）订阅。
+	 *
+	 * <p>内部页签文案只在创建时设置过一次，不属于"每次重绘都重新取文案"那类，
+	 * 不订阅就会一直是打开文件那一刻的语言（表现为切了英文、页签还是中文）。</p>
+	 */
+	private MessageBusConnection languageConnection;
 
 	public DataChartEditor(Project project, VirtualFile file) {
 		this.project = project;
@@ -131,6 +141,11 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 					tabs.select(boardTab, false);
 					editorPanel.add(tabs.getComponent(), BorderLayout.CENTER);
 
+					// 语言切换（工具栏 EN / 中文）后刷新页签文案；
+					// connect(this) 让连接随编辑器 dispose 自动释放
+					languageConnection = ApplicationManager.getApplication().getMessageBus().connect(this);
+					languageConnection.subscribe(DataChartLanguage.CHANGED, (Runnable) this::applyTabTexts);
+
 					initialized = true;
 					// 打开文件时加载已有内容
 					loadFromFile();
@@ -150,6 +165,25 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		}
 		String name = file.getNameWithoutExtension();
 		return (name == null || name.isEmpty()) ? "datachart" : name;
+	}
+
+	/**
+	 * 刷新内部页签文案（语言切换后由 {@link DataChartLanguage#CHANGED} 触发）。
+	 *
+	 * <p>页签文字只设置过一次，不会自己跟着语言变，所以必须在这里重设；
+	 * 文案长度变化后页签宽度也会变，顺手让容器重新布局。</p>
+	 */
+	private void applyTabTexts() {
+		if (boardTab != null) {
+			boardTab.setText(DataChartBundle.message("DataChart.editor.tab.board"));
+		}
+		if (textTab != null) {
+			textTab.setText(DataChartBundle.message("DataChart.editor.tab.text"));
+		}
+		if (tabs != null) {
+			tabs.getComponent().revalidate();
+			tabs.getComponent().repaint();
+		}
 	}
 
 	/**
@@ -413,6 +447,9 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 			}
 		}
 		// 清理资源
+		if (languageConnection != null) {
+			languageConnection.disconnect();
+		}
 		if (fileSync != null) {
 			fileSync.dispose();
 		}

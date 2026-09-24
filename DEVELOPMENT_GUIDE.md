@@ -1292,6 +1292,50 @@ JMenuItem item = new FlatMenuItem(DataChartBundle.message("DataChart.menu.find.u
 `taskdef class com.intellij.ant.InstrumentIdeaExtensions cannot be found`，
 **先试 `./gradlew clean buildPlugin`** —— 本次就是陈旧构建状态（配置缓存 / 被跳过的
 `initializeIntelliJPlugin`）导致的假报错，clean 后即 BUILD SUCCESSFUL，并非版本不兼容。
+
+#### 语言切换与"一次性文案"（2026-09-24）
+
+本插件的语言**不跟随 IDE locale**：用户在看板工具栏用 `EN / 中文` 按钮切换（`DataChartLanguage.toggle()`），
+选择存进 `PropertiesComponent`（应用级），`DataChartBundle` 按它解析资源包并缓存；
+切换时 `invalidate()` 清缓存 + 广播 `DataChartLanguage.CHANGED`（`Topic<Runnable>`）。
+
+⚠️ **必须遵守的约定**：凡是"建好之后不会再更新"的用户可见文案，都要在 `CHANGED` 回调里刷新。
+把界面分成两类看：
+
+| 类型 | 例子 | 需要订阅 `CHANGED`？ |
+| --- | --- | --- |
+| 每次现建 / 每次重绘都重新取文案 | 右键菜单、通知、对话框、画布上的提示文字 | 不需要 |
+| 建好后固定不变 | 工具栏按钮文字 / tooltip（`DataChartView.applyTexts`）、**编辑器内部页签**（`DataChartEditor.applyTabTexts`） | **必须订阅** |
+
+本次的 bug 正是第二类漏了一处：`DataChartEditor` 的 Board / Text 页签文字只在 `ensureInitialized()`
+里设过一次，切英文后页签还是「看板 / 文本」。修法：
+
+```java
+languageConnection = ApplicationManager.getApplication().getMessageBus().connect(this);
+languageConnection.subscribe(DataChartLanguage.CHANGED, (Runnable) this::applyTabTexts);
+```
+
+- `connect(this)` 让连接随编辑器 `dispose` 自动释放（`dispose()` 里再显式 `disconnect()` 兜底）；
+- 刷新后顺带 `tabs.getComponent().revalidate()/repaint()` —— 文案长度变了，页签宽度要重新算。
+
+#### 语言按钮显示「将切到的语言」（2026-09-24）
+
+工具栏语言按钮的文案是**目标语言**，不是当前语言：
+
+| 当前语言 | 按钮文字 | tooltip |
+| --- | --- | --- |
+| 中文 | `EN` | 切换到英文 |
+| 英文 | `中文` | 切换到中文 |
+
+显示成当前语言是反的 —— 用户看到「中文」会以为"点了还是中文"，而且和 tooltip「切换到英文」自相矛盾。
+
+```java
+// DataChartView.applyTexts()
+languageButton.setText(chinese ? DataChartLanguage.DISPLAY_EN : DataChartLanguage.DISPLAY_ZH);
+```
+
+`DataChartLanguage.DISPLAY_EN / DISPLAY_ZH` 用「该语言自己怎么写」来标注，**有意不进资源包**、不随界面语言翻译
+（与 IDE 的 Language 设置里 `English / 中文` 的写法一致）。
 `runIde` 同样依赖 `instrumentCode`（`runIde → prepareSandbox → jar → instrumentedJar → instrumentCode`），
 所以这个报错会让 `runIde` 也失败，别误以为是代码问题。
 

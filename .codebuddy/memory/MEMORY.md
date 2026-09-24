@@ -18,7 +18,15 @@
   - 资源包：`resources/messages/DataChartBoundle.properties`（base 英文，**必需**）
     + `DataChartBoundle_zh.properties`（中文，非 ASCII 用 `\uXXXX` 转义）。key 命名 `DataChart.<模块>.<语义>`，
     新增 key 两个文件都要加。
-  - `DataChartBundle extends com.intellij.DynamicBundle`，路径 `"messages.DataChartBoundle"` 相对 classpath 根。
+  - `DataChartBundle.message(...)` **自己解析** `ResourceBundle`（路径 `"messages.DataChartBoundle"`，相对 classpath 根），
+    **不用** `DynamicBundle` —— 它按 IDE locale 解析且平台缓存结果，会让插件自己的语言开关失效；
+    `Control.getFallbackLocale` 返回 **null** 掐掉"回退 JVM 默认 locale"（否则中文系统上请求英文也会拿到 `_zh`）。
+  - **语言按钮显示"将切到的语言"（用户明确要求）**：中文界面显示 `EN`、英文界面显示 `中文`（不是当前语言！），
+    用该语言自己怎么写来标注、**不进资源包**；tooltip 同样是目标语义（"切换到英文/中文"）。
+  - **插件语言独立于 IDE**：工具栏 `EN / 中文` 按钮 → `DataChartLanguage.toggle()`（存 `PropertiesComponent`，默认英文）
+    → `DataChartBundle.invalidate()` + 广播 `DataChartLanguage.CHANGED`（`Topic<Runnable>`）。
+    ⚠️ **凡"建好后不再更新"的用户可见文案都必须订阅 `CHANGED` 刷新**（工具栏按钮、编辑器内部页签）；
+    每次现建的（右键菜单 / 通知 / 对话框 / 画布绘制时取文案）不用管。漏订阅的表现就是"切了英文这里还是中文"。
   - **2026-09-21 已完成全量迁移**：73 个 key（71 代码 + 2 plugin.xml），覆盖 BoardContextMenu /
     DataChartView / KanbanBoard / KanbanCard / DataChartEditor / TableNavigator / TableDropHandler / Donation；
     日志、注释、数据库来的数据（表名/列名）保持中文不动。
@@ -106,6 +114,8 @@
 - **内部页签贴底部**（用户要求）：`tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom)`
   —— 默认 top 会与 IDE 自己的 Tab 栏叠在一起。⚠️ `setTabsPosition` 在 `JBTabsPresentation` 上（不是 `JBTabs`）；
   `JBTabsPosition` 枚举常量是**小写** `top/left/bottom/right`；平台只有四边、无"靠右"选项，底部时页签自左侧排列。
-- 页签名走 i18n：`DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.tab.text`（Text / 文本）。
+- 页签名走 i18n：`DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.tab.text`（Text / 文本）；
+  **切语言后要刷新**（页签文字建好就固定）：`DataChartEditor` 订阅 `DataChartLanguage.CHANGED` → `applyTabTexts()` 重设
+  两个 `TabInfo` + `revalidate()/repaint()`（`connect(this)` 随 dispose 释放）。
 - 教训：`loading` 标志要在 `loadFromJson` **之后**解除，否则重建看板的回调会把刚打开的文件标记成已修改。
 - 详见 DEVELOPMENT_GUIDE 第 50 节「✅✅ 最终方案：编辑器内部页签」。

@@ -151,8 +151,11 @@ public class DataChartView extends DialogWrapper {
 		}
 		if (languageButton != null) {
 			boolean chinese = DataChartLanguage.isChinese();
-			// 语言按钮自身用「该语言怎么写」标注（EN / 中文），这是语言选择器的惯例，不参与翻译
-			languageButton.setText(chinese ? DataChartLanguage.DISPLAY_ZH : DataChartLanguage.DISPLAY_EN);
+			// 按钮显示"点一下会切到哪个语言"：中文界面显示 EN、英文界面显示 中文。
+			// 这样和下面的 tooltip（"切换到英文"/"切换到中文"）语义一致 ——
+			// 显示当前语言会让人以为"点了还是中文"，是反的。
+			// 语言名用该语言自己怎么写，因此这两个常量不参与翻译（见 DataChartLanguage#DISPLAY_EN）。
+			languageButton.setText(chinese ? DataChartLanguage.DISPLAY_EN : DataChartLanguage.DISPLAY_ZH);
 			languageButton.setToolTipText(DataChartBundle.message(chinese
 					? "DataChart.view.toolbar.language.tooltip.toEn"
 					: "DataChart.view.toolbar.language.tooltip.toZh"));

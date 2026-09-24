@@ -41,10 +41,14 @@ public final class DataChartLanguage {
 	private static final String VALUE_ZH = "zh";
 
 	/**
-	 * 语言按钮上的文字。
+	 * 语言按钮上的文字（<b>显示的是"点一下会切到的语言"</b>）。
 	 *
-	 * <p>语言选择器用「该语言自己怎么写」来标注（与 IDE 的 Language 设置一致），
-	 * 因此这两个常量<b>有意不进资源包</b>：切到中文时显示「中文」，切到英文时显示「EN」。</p>
+	 * <p>即：当前是中文时按钮显示 {@link #DISPLAY_EN}「EN」，当前是英文时显示
+	 * {@link #DISPLAY_ZH}「中文」—— 与按钮 tooltip（"切换到英文"/"切换到中文"）语义一致。
+	 * 显示成"当前语言"会让人误以为"点了还是中文"，正好反了。</p>
+	 *
+	 * <p>语言名用「该语言自己怎么写」来标注（与 IDE 的 Language 设置一致），
+	 * 因此这两个常量<b>有意不进资源包</b>，不随界面语言翻译。</p>
 	 */
 	public static final String DISPLAY_EN = "EN";
 	public static final String DISPLAY_ZH = "中文";
