@@ -60,7 +60,7 @@
 
 <img src="/Users/lww/Library/Application Support/typora-user-images/image-20260921124547641.png" alt="image-20260921124547641" style="zoom:50%;" />
 
-为什么用文件管理？因为用文件管理，就可以通过 `git`来管理和共享了，就算是刚入职的新手，看着图也能知道各种业务的表结构和关联了。
+为什么用文件管理？因为用文件管理，就可以和代码一起来管理和共享了，就算是刚入职的新手，把代码拉下来，看着图也能知道各种业务的表结构和关联了。
 
 ### 添加表
 
@@ -86,11 +86,69 @@
 
 <img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924161419304.png" alt="image-20260924161419304" style="zoom:50%;" />
 
-我们多连几张
+我们多连几张（下图是导出图片的效果）
 
+![用户_20260924_165320](/Users/lww/用户_20260924_165320.jpg)
 
+还可以导出 `pdf`，是支持文本搜索的 `pdf` 哦！
 
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924172457619.png" alt="image-20260924172457619" style="zoom:50%;" />
 
+不过插件也支持搜索，输入完之后回车就可以啦。
 
+![image-20260924171302720](/Users/lww/Library/Application Support/typora-user-images/image-20260924171302720.png)
 
+### 菜单功能
+
+#### 复制、跳转
+
+一些简单的小功能，还有跳转，可以查看表的 `DDL` 语句，查看数据，还有在 `Database Explorer` 中定位表
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924165638086.png" alt="image-20260924165638086" style="zoom:50%;" />
+
+表头和列上面菜单是不一样的。而且列的前半部分右键是菜单，后面就是拉线出来了。
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924171404835.png" alt="image-20260924171404835" style="zoom:50%;" />
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924171512852.png" alt="image-20260924171512852" style="zoom:50%;" />
+
+#### 同步表结构
+
+如果修改了表的列，怎么办？就需要同步表结构了。
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924171820881.png" alt="image-20260924171820881" style="zoom:50%;" />
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924171953368.png" alt="image-20260924171953368" style="zoom:50%;" />
+
+新增和删除的列会有一个效果，不过是一次性的，关闭再打开就没有了。
+
+#### 查找引用
+
+这个是调用 `idea` 的 `Find`
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924165932979.png" alt="image-20260924165932979" style="zoom:50%;" />
+
+### AI
+
+插件没有 `AI` 功能，不过你用文本打开 `datachart` 文件，会发现它就是个 `json`
+
+第一个元素就是 `aiGuide`
+
+![image-20260924170707181](/Users/lww/Library/Application Support/typora-user-images/image-20260924170707181.png)
+
+因此你可以通过`AI` 编程插件来根据 `datachart` 文件写 `sql`
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924170317381.png" alt="image-20260924170317381" style="zoom:50%;" />
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924170544498.png" alt="image-20260924170544498" style="zoom:50%;" />
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924170615188.png" alt="image-20260924170615188" style="zoom:50%;" />
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924170637916.png" alt="image-20260924170637916" style="zoom:50%;" />
+
+### 放大缩小
+
+画板是可以放大缩小的，通过 `command`+滚轮，或者 `ctrl`+鼠标滚轮 可以放大缩小画板。
+
+还有一些其他细节的地方就不多说了，大家去体验吧。
 
