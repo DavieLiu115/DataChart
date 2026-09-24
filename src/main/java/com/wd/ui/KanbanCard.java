@@ -160,6 +160,9 @@ public class KanbanCard {
 	 *
 	 * <p>2026-08-01 引入：用于 {@link #computeRequiredWidth(TableInfo)}。
 	 * 字段少的表（如 3-5 个字段）维持在 280px，字段多或内容长的表自动加宽。</p>
+	 *
+	 * <p>⚠️ 2026-09-24 起卡片宽度固定为 280（用户要求"不用加表宽度"），
+	 * 这个常量目前只作为"最小宽度"的语义保留，实际宽度取 {@code KanbanBoard.TABLE_CARD_WIDTH}（同值 280）。</p>
 	 */
 	private static final int TABLE_CARD_MIN_WIDTH = 280;
 
@@ -190,6 +193,24 @@ public class KanbanCard {
 	 * @return 推荐宽度（最小 {@link #MIN_TABLE_CARD_WIDTH}）
 	 */
 	public static int computeRequiredWidth(TableInfo tableInfo) {
+		return computeRequiredWidth(tableInfo, null);
+	}
+	// ⚠️ 2026-09-24 起 computeRequiredWidth / forTableAutoWidth 这一套"按内容加宽"暂时**不被调用**：
+	// 用户明确要求"不用加表宽度"，卡片宽度固定 280（KanbanBoard.TABLE_CARD_WIDTH），
+	// 长注释改为整句绘制、溢出卡片右侧（见 drawTableCard）。
+	// 保留这套实现备用 —— 若以后要恢复自适应宽度，把 addTableCard / loadFromChartData /
+	// setTableInfoWithDiff 三处的宽度换回 computeRequiredWidth(...) 即可（字体/间距已与绘制对齐）。
+
+	/**
+	 * 同上，并把 {@code extraColumns} 一起参与度量。
+	 *
+	 * <p>用途：结构同步时"已删除列"仍会画在卡片里（浅红底 + 中划线），
+	 * 它们的「列名 : 类型 + 注释」也要算进宽度，否则那几行会被省略号截断。</p>
+	 *
+	 * @param tableInfo    表元信息
+	 * @param extraColumns 额外参与度量的列（可为 null）
+	 */
+	public static int computeRequiredWidth(TableInfo tableInfo, List<ColumnInfo> extraColumns) {
 		if (tableInfo == null) {
 			return MIN_TABLE_CARD_WIDTH;
 		}
@@ -225,20 +246,25 @@ public class KanbanCard {
 			maxContent = Math.max(maxContent, headerW);
 
 			// 2. 列行：列名 + " : " + 类型 + 6px + "/* 注释 */"
-			List<ColumnInfo> columns = tableInfo.getColumns();
-			if (columns != null) {
-				for (ColumnInfo col : columns) {
-					String name = col.getName() == null ? "" : col.getName();
-					String type = col.getType() == null ? "" : col.getType();
-					String nameAndSep = name + " : " + type;
-					int colW = iconZone + colFm.stringWidth(nameAndSep);
-					String comment = col.getComment();
-					if (comment != null && !comment.isEmpty()) {
-						String cmtText = "/* " + comment + " */";
-						colW += commentGap + italicFm.stringWidth(cmtText);
-					}
-					maxContent = Math.max(maxContent, colW);
+			//    extraColumns（结构同步时保留展示的"已删除列"）同样会画出来，一起度量
+			List<ColumnInfo> measured = new java.util.ArrayList<>();
+			if (tableInfo.getColumns() != null) {
+				measured.addAll(tableInfo.getColumns());
+			}
+			if (extraColumns != null) {
+				measured.addAll(extraColumns);
+			}
+			for (ColumnInfo col : measured) {
+				String name = col.getName() == null ? "" : col.getName();
+				String type = col.getType() == null ? "" : col.getType();
+				String nameAndSep = name + " : " + type;
+				int colW = iconZone + colFm.stringWidth(nameAndSep);
+				String comment = col.getComment();
+				if (comment != null && !comment.isEmpty()) {
+					String cmtText = "/* " + comment + " */";
+					colW += commentGap + italicFm.stringWidth(cmtText);
 				}
+				maxContent = Math.max(maxContent, colW);
 			}
 
 			// 3. 加上左右 padding
@@ -376,6 +402,7 @@ public class KanbanCard {
 		int totalColCount = (newInfo.getColumns() == null ? 0 : newInfo.getColumns().size()) + deletedColumns.size();
 		double bodyH = totalColCount * ROW_HEIGHT;
 		double h = Math.max(50.0, HEADER_HEIGHT + bodyH + PADDING);
+		// 宽度不动（2026-09-24 定稿：固定 280，长注释溢出展示，不加宽也不截断）
 		bounds.setRect(bounds.getX(), bounds.getY(), bounds.getWidth(), h);
 
 		// 如果有新增列，触发左侧划入动画
@@ -997,12 +1024,11 @@ public class KanbanCard {
 		String tableComment = tableInfo.getComment();
 		if (tableComment != null && !tableComment.isEmpty()) {
 			int commentX = headerTextX + headerFm.stringWidth(tableName) + 6;
-			int maxCommentW = (int) (bounds.getX() + bounds.getWidth() - padding - commentX);
 			g2d.setFont(italicHeaderFont);
 			g2d.setColor(isDark ? new Color(0xAAAAAA) : new Color(0x666666));
 			FontMetrics italicFm = g2d.getFontMetrics();
-			String commentText = "/* " + tableComment + " */";
-			g2d.drawString(truncateByWidth(commentText, maxCommentW, italicFm),
+			// 2026-09-24 不截断：注释整句画出来，允许溢出到卡片右侧（用户要求"不省略、也不加宽卡片"）
+			g2d.drawString("/* " + tableComment + " */",
 					commentX, headerCenterY + (italicFm.getAscent() - italicFm.getDescent()) / 2);
 			g2d.setFont(headerFont);
 		}
@@ -1018,9 +1044,7 @@ public class KanbanCard {
 
 		g2d.setFont(columnFont);
 		FontMetrics colFm = g2d.getFontMetrics();
-		g2d.setFont(italicCommentFont);
-		FontMetrics italicFm = g2d.getFontMetrics();
-		g2d.setFont(columnFont);
+		// 2026-09-24：注释不再按宽度截断，所以这里不再需要 italicCommentFont 的 FontMetrics
 
 		int maxRows = (int) ((maxBodyY - bodyTop) / rowHeight);
 		int rowCount = Math.min(columns.size(), maxRows);
@@ -1116,17 +1140,13 @@ public class KanbanCard {
 			int typeW = colFm.stringWidth(col.getType());
 
 			// 3. 注释（斜体灰色）
+			//    2026-09-24 不截断：整句画出，允许溢出到卡片右侧（用户要求"不省略、也不加宽卡片"）；
+			//    原来还有 `maxCommentW > 10` 才画的门槛，注释一长甚至会被整条丢掉，一并去掉
 			String comment = col.getComment();
 			if (comment != null && !comment.isEmpty()) {
-				int cmtX = typeX + typeW + 6;
-				int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
-				if (maxCmtW > 10) {
-					g2d.setFont(italicCommentFont);
-					g2d.setColor(rowCommentColor);
-					String commentText = "/* " + comment + " */";
-					g2d.drawString(truncateByWidth(commentText, maxCmtW, italicFm),
-							cmtX, textY);
-				}
+				g2d.setFont(italicCommentFont);
+				g2d.setColor(rowCommentColor);
+				g2d.drawString("/* " + comment + " */", typeX + typeW + 6, textY);
 			}
 		}
 
@@ -1177,13 +1197,9 @@ public class KanbanCard {
 
 			String comment = delCol.getComment();
 			if (comment != null && !comment.isEmpty()) {
-				int cmtX = typeX + typeW + 6;
-				int maxCmtW = (int) (bounds.getX() + bounds.getWidth() - padding - cmtX);
-				if (maxCmtW > 10) {
-					g2d.setFont(italicCommentFont);
-					String commentText = "/* " + comment + " */";
-					g2d.drawString(truncateByWidth(commentText, maxCmtW, italicFm), cmtX, textY);
-				}
+				// 2026-09-24 同上：不截断、不设宽度门槛
+				g2d.setFont(italicCommentFont);
+				g2d.drawString("/* " + comment + " */", typeX + typeW + 6, textY);
 			}
 
 			// 画贯穿一整行的删除线（中划线）
@@ -1278,7 +1294,11 @@ public class KanbanCard {
 	}
 
 	/**
-	 * 按宽度截断文本（省略号结尾）
+	 * 按宽度截断文本（省略号结尾）。
+	 *
+	 * <p>⚠️ 2026-09-24 起<b>不再被调用</b>：用户要求注释"不省略"，改为整句绘制、允许溢出卡片右侧
+	 * （同时明确要求"不用加表宽度"，所以卡片宽度也保持固定 280）。
+	 * 方法保留备用 —— 若哪天要恢复限宽，直接把它套回 {@code drawTableCard} 的注释绘制处即可。</p>
 	 */
 	private static String truncateByWidth(String text, int maxWidth, FontMetrics fm) {
 		if (fm.stringWidth(text) <= maxWidth) {

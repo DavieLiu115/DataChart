@@ -387,6 +387,10 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 
 ### 22. 卡片宽度改回固定值 + 注释截断（2026-08-01 用户反馈改回）
 
+> ⚠️ **本节被第 51 节部分修订**（2026-09-24）：
+> "宽度固定 280"**仍然有效**；但"注释截断 + 省略号"已取消 ——
+> 现在注释整句绘制、允许溢出卡片右侧（用户要求"不省略、也不用加表宽度"）。
+
 #### 需求变更
 - 用户反馈："每个表的宽度应该是固定的，一样的，注释太长截取一部分，后面用省略号"
 - 之前的 21 节按需加宽让不同表宽度不一致（sys_job 460, gen_field_config 可能 280），不满足"统一"要求
@@ -632,6 +636,39 @@ Win 系统下从列行按下左键拖拽鼠标到终点，**松手后连线不�
 - **加载文件恢复连线** / **编程方式建线** 也走 palette，保持视觉一致
 - 第 33 节修复（清源行用户选中）依然必要，但**清掉的应该是"激活高亮"而不是"连线本身的颜色"**——连线仍应保留 palette 区分
 - **预览色由粉色改为深灰（2026-08-04 用户反馈）**：`CONNECTION_PREVIEW_COLOR` 改为 `JBColor(浅色 #757575, 深色 #AAAAAA)`，预览连线绘制处（原 `Color.PINK`）也统一用它。避免粉色与 palette 中的粉紫/粉红系颜色混淆
+
+#### 2026-09-24 换色（用户给定 light / dark 两套色）
+
+`CONNECTION_COLOR_PALETTE` 换成 6 色的 `JBColor` 数组（一个元素同时挂浅色 / 深色两版）：
+
+| 色相 | 浅色 | 深色 |
+| --- | --- | --- |
+| 紫 | `#E2D5FF` | `#4A3B6E` |
+| 蓝 | `#D1E4FF` | `#2A4A75` |
+| 绿 | `#D0F0D9` | `#2A5A3A` |
+| 橙 | `#FFEBCC` | `#6E4A2A` |
+| 青 | `#D6FAFF` | `#2A6E75` |
+| 粉 | `#FBE2FF` | `#6E2A75` |
+
+```java
+private static final Color[] CONNECTION_COLOR_PALETTE = {
+        new JBColor(new Color(0xE2D5FF), new Color(0x4A3B6E)), // 紫
+        new JBColor(new Color(0xD1E4FF), new Color(0x2A4A75)), // 蓝
+        // …绿 / 橙 / 青 / 粉
+};
+```
+
+- **为什么用 `JBColor` 而不是两个数组**：主题开关没有一路传到 `Connection.draw(g2d)`（它只收 `Graphics2D`），
+  `paintForExport` 的 `dark` 也是从画布背景亮度反推的 —— 用 `JBColor` 就能让连线颜色与卡片/画布走
+  **同一次主题判定**，不必改 `Connection`、`drawCards` 的签名。
+  （`BoardExportUtil.isDarkTheme(background)` 读的就是 JBColor 解析后的背景亮度，所以导出与界面一致。）
+- ⚠️ 这组颜色**同时**是"连线占用行"的行背景色（`computeLinkedRows` → `getResolvedLineColor()`）：
+  浅色版必须低饱和（垫得住正文），深色版也不能比正文抢眼。
+- 浅色版比上一版更淡（`#D6FAFF` / `#FFEBCC` 接近白），当 2.4px 的线画在浅灰画布上会偏淡 ——
+  先按用户给的色值原样落地；若嫌不显眼，优先加粗（`Connection.DEFAULT_STROKE_WIDTH`）
+  或把浅色版统一压低 10~15% 亮度，**不要**动深色版（深色版已经够暗）。
+- 颜色**不写入** `.datachart`（加载时按此表重新分配），所以改这一处，旧看板打开也会跟着变色。
+- 循环周期 6：超过 6 条连线开始重复，需要更多就按"同色相浅+深"成对往数组里加。
 
 ### 35. 卡片 ID 用 UUID，兼容旧 schema.table id（2026-08-07）
 #### 问题
@@ -1813,4 +1850,47 @@ public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
 
 **判定经验**：`.datachart` 一旦出现多余/同名的 tab、且其中一个是纯文本，
 先怀疑"平台的 `PsiAwareTextEditorProvider` 没被抑制"，而不是先怀疑自己的高亮代码。
+
+---
+
+### 51. 长注释的展示：不截断 + 溢出卡片（2026-09-24 定稿）
+
+#### 需求（来回两轮才明确，别再看错）
+1. 第一轮："列的 comment 太长就给省略了，能不能改成…不省略，**超出表格宽度也没问题**"；
+2. 第二轮（看到卡片被加宽的截图后）："你是增加了表的宽度么？… **不用加表宽度**"。
+
+合起来 = **卡片宽度保持固定 280，注释整句绘制，允许文字溢出到卡片右侧**。
+"超出表格宽度也没问题"指的是**文字**可以出框，**不是**把卡片加宽。
+
+#### 实现
+`KanbanCard.drawTableCard` 的注释绘制处去掉 `truncateByWidth(...)`，直接画整句：
+
+| 位置 | 改动 |
+| --- | --- |
+| 表头注释 | `g2d.drawString("/* " + tableComment + " */", commentX, ...)`（原先外包 `truncateByWidth(..., maxCommentW, ...)`） |
+| 列注释 | 同上，并**去掉 `maxCommentW > 10` 才绘制的门槛**（原逻辑下注释太长会被整条丢掉） |
+| "已删除列"注释 | 同上 |
+
+宽度侧全部回到固定值：`KanbanBoard.addTableCard` / `loadFromChartData` 都用 `TABLE_CARD_WIDTH`(280)，
+`KanbanCard.setTableInfoWithDiff` 继续 `setRect(..., bounds.getWidth(), h)`（宽度不动）。
+
+#### 有意保留的"备用实现"（别当垃圾代码删）
+- `KanbanCard.computeRequiredWidth(TableInfo[, extraColumns])` + `forTableAutoWidth(...)`：
+  当天曾短暂启用（按内容自适应加宽），随后按用户要求撤回，现在**无人调用**。
+  它的度量与 `drawTableCard` 的字体 / 间距是**逐项对齐过的**
+  （`headerFont BOLD 13` / `italicHeaderFont ITALIC 11` / `columnFont PLAIN 11` / `italicCommentFont ITALIC 10`；
+  `padding 10`、`iconZone 20`、`headerIconZone 18`、`commentGap 6`），
+  将来要恢复"自适应宽度"，把上面三处宽度换回 `computeRequiredWidth(...)` 即可。
+- `KanbanCard.truncateByWidth(...)`：同样保留备用（要恢复限宽就套回注释绘制处即可）。
+- 这三处都加了 `⚠️ 当前未启用 / 不再被调用` 注释，避免下次被误删。
+
+#### 已知副作用（本次需求明确接受）
+- 长注释会画到卡片右边、甚至压到相邻卡片上（绘制没有裁剪）；
+- 卡片宽度仍固定 280，所以 `sys_job` / `sys_role` 这类长注释表看起来是"文字出框"。
+
+#### 验证
+`runIde` 打开含长注释的表（如 `sys_role.data_scope` 的"数据权限（1：全部数据权限…）"）：
+1. 卡片宽度仍是 280（不随内容变宽）；
+2. 注释整句显示、可越过卡片右边框，无 `...`；
+3. 右键「同步表结构」后同样没有省略号、宽度不变。
 

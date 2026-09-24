@@ -167,16 +167,38 @@ public class KanbanBoard extends JPanel {
 	/** 卡片默认尺寸 */
 	private static final double DEFAULT_CARD_WIDTH = 200;
 
-	/** 连线颜色集合（浅色不饱和，每条连线用一种） */
+	/**
+	 * 连线颜色集合（每条连线按顺序循环取一种）。
+	 *
+	 * <p>2026-09-24 换色（用户给定色组）：用 {@link JBColor} 一个元素同时挂<b>浅色 / 深色</b>两版 ——
+	 * 浅色主题用低饱和浅色，深色主题用同色相的深色，这样切主题不用改 palette，连线与行背景都自动跟着走。</p>
+	 *
+	 * <table>
+	 *   <tr><th>色相</th><th>浅色</th><th>深色</th></tr>
+	 *   <tr><td>紫</td><td>#E2D5FF</td><td>#4A3B6E</td></tr>
+	 *   <tr><td>蓝</td><td>#D1E4FF</td><td>#2A4A75</td></tr>
+	 *   <tr><td>绿</td><td>#D0F0D9</td><td>#2A5A3A</td></tr>
+	 *   <tr><td>橙</td><td>#FFEBCC</td><td>#6E4A2A</td></tr>
+	 *   <tr><td>青</td><td>#D6FAFF</td><td>#2A6E75</td></tr>
+	 *   <tr><td>粉</td><td>#FBE2FF</td><td>#6E2A75</td></tr>
+	 * </table>
+	 *
+	 * <p>⚠️ 这组颜色<b>同时</b>用作"连线占用行"的行背景（见 {@link #computeLinkedRows()}：
+	 * 线是什么颜色，它两端落点的行背景就是什么颜色），所以浅色版必须低饱和（垫得住正文），
+	 * 深色版也别太亮（在暗卡片上不能比文字还抢眼）。</p>
+	 *
+	 * <p>颜色不写进 .datachart（加载时按此表重新分配），所以改这里旧看板也会跟着变色。
+	 * 用 {@code JBColor} 而不是写死两个数组：绘制与导出的深色判定都取自当前主题
+	 * （{@code BoardExportUtil.isDarkTheme(background)} 读的就是 JBColor 解析后的背景亮度），
+	 * 所以连线颜色跟着主题自动切换，和卡片/画布保持同一次判定。</p>
+	 */
 	private static final Color[] CONNECTION_COLOR_PALETTE = {
-			new Color(0xB0C4DE), // 浅钢蓝
-			new Color(0xC8A2C8), // 淡紫
-			new Color(0xFFD1A4), // 浅橙
-			new Color(0xC1E1C5), // 浅绿
-			new Color(0xFFB7B2), // 浅粉红
-			new Color(0xFFE9A8), // 浅黄
-			new Color(0xAEC6CF), // 浅蓝灰
-			new Color(0xD7BDE2)  // 淡紫罗兰
+			new JBColor(new Color(0xE2D5FF), new Color(0x4A3B6E)), // 紫
+			new JBColor(new Color(0xD1E4FF), new Color(0x2A4A75)), // 蓝
+			new JBColor(new Color(0xD0F0D9), new Color(0x2A5A3A)), // 绿
+			new JBColor(new Color(0xFFEBCC), new Color(0x6E4A2A)), // 橙
+			new JBColor(new Color(0xD6FAFF), new Color(0x2A6E75)), // 青
+			new JBColor(new Color(0xFBE2FF), new Color(0x6E2A75))  // 粉
 	};
 
 	/** 当前连线颜色索引（循环分配） */
@@ -1447,8 +1469,9 @@ public class KanbanBoard extends JPanel {
 		double height = TABLE_CARD_BASE_HEIGHT + rowCount * TABLE_CARD_ROW_HEIGHT;
 		// 2026-08-20 高度完全由列数决定，不设上下限（80 列的卡会很高，属预期）
 
-		// 2026-08-01 改回固定宽度：所有表格卡片统一宽度，注释过长按宽度截断 + 省略号
-		// （之前 21 节按需加宽会让不同表宽度不一致，且注释过长也不会触发 truncateByWidth）
+		// 2026-09-24 定稿：宽度**保持固定 280**（用户明确说"不用加表宽度"）。
+		// 长注释的展现方式改为"不截断、直接溢出卡片右侧"（见 KanbanCard.drawTableCard）。
+		// 期间曾试过按内容自适应加宽（KanbanCard.computeRequiredWidth），已按用户要求撤回。
 		double cardWidth = TABLE_CARD_WIDTH;
 
 		double x;
@@ -1929,7 +1952,7 @@ public class KanbanBoard extends JPanel {
 		// 2026-08-01 改回保留位置策略：
 		// 25 节强制归一化位置到 (0, 0)+4 张/行平铺 → 破坏了用户拖动过的位置（用户反馈"位置变了"）
 		// 现在改为：保留 model.getX()/getY() 位置，**只修正尺寸**：
-		//   1. table card 宽度统一为 TABLE_CARD_WIDTH（280）
+		//   1. table card 宽度按内容自适应（注释长则更宽，不再固定 280 → 见 2026-09-24）
 		//   2. 高度按字段数计算（不再用 saved height）
 		// 这样 calculateTotalBounds 用真实 bounds 算，导出图正确；同时保留用户布局意图
 		for (ChartData.TableCardModel model : data.getTables()) {
@@ -1952,6 +1975,7 @@ public class KanbanBoard extends JPanel {
 			}
 
 			// 保留 model 的 x, y（用户拖动过的位置）
+			// 宽度固定 280（2026-09-24 定稿，与 addTableCard 一致；长注释靠溢出展示，不截断）
 			KanbanCard card = KanbanCard.forTable(info.getId(), info,
 					model.getX(), model.getY(), TABLE_CARD_WIDTH, height);
 			if (model.getHighlightedRows() != null) {

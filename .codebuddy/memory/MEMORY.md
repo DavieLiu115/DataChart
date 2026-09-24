@@ -54,9 +54,20 @@
 ### 1~6 基础约定
 - **卡片 ID 用 UUID**：拖入重复表时 `TableInfo.setId(UUID.randomUUID())` 覆盖 `schema.table` 拼接；加载旧文件时检测重复 id 补 UUID（35 节）。
 - **连线列定位用列名**：`ChartRelation.from/toColumnName` 存列名，删除列后仍准确；`BoardPersistence.resolveRowIndex` 优先列名 → 回退 index。**列 index 在表结构变化后必须用列名重定位**。
-- **卡片宽度固定 280**：注释过长按宽度截断 + `...`（22 节）。
+- **卡片宽度固定 280；长注释不截断、直接溢出卡片（2026-09-24 定稿，用户明确要求）**：
+  用户原话"不省略、**超出表格宽度也没问题**"+"**不用加表宽度**" → 文字可以出框，卡片不加宽。
+  `KanbanCard.drawTableCard` 三处注释绘制不再调 `truncateByWidth`（并去掉 `maxCommentW > 10` 才画的门槛）。
+  `computeRequiredWidth` / `forTableAutoWidth` / `truncateByWidth` **有意保留但当前无人调用**（带"未启用"注释，别删）——
+  将来要恢复自适应宽度，把 `KanbanBoard.addTableCard` / `loadFromChartData` / `KanbanCard.setTableInfoWithDiff` 三处宽度换回 `computeRequiredWidth(...)` 即可。
+  详见 DEVELOPMENT_GUIDE 第 51 节（22 节仅"截断"部分被修订，固定宽度仍有效）。
 - **位置保留用户拖动结果**：加载时保留 `model.x/y` 只修正尺寸；新建卡片从 (0,0) 平铺，4 张/行（26 节）。
 - **默认关系类型**：`RelationType.ONE_TO_ONE` 作默认，旧文件 UNKNOWN 也回退（29 节）。
+- **连线配色**（`KanbanBoard.CONNECTION_COLOR_PALETTE`，2026-09-24 用户指定的 light/dark 两套色，用 `JBColor` 一个元素挂两版，
+  按顺序循环分配，周期 6）：紫 `#E2D5FF`/`#4A3B6E`、蓝 `#D1E4FF`/`#2A4A75`、绿 `#D0F0D9`/`#2A5A3A`、
+  橙 `#FFEBCC`/`#6E4A2A`、青 `#D6FAFF`/`#2A6E75`、粉 `#FBE2FF`/`#6E2A75`。
+  用 `JBColor` 是因为主题开关没有传到 `Connection.draw(Graphics2D)`，这样连线色与卡片/画布共用同一次主题判定。
+  ⚠️ 同一组颜色**兼作"连线占用行"的行背景色**（`computeLinkedRows` → `Connection.getResolvedLineColor()`），
+  所以必须保持**低饱和浅色**，不能换成高饱和线框色；颜色不写入 .datachart（加载时重新分配）。详见 34 节末尾。
 - **扩展名常量**：`DataToolsFileType.EXTENSION = "datachart"`，不要硬编码（9 节）。
 
 ### 7~9 布局与尺寸（共同教训：同步/ 零值）
