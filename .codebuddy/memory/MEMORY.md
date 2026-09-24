@@ -63,13 +63,16 @@
 - **位置保留用户拖动结果**：加载时保留 `model.x/y` 只修正尺寸；新建卡片从 (0,0) 平铺，4 张/行（26 节）。
 - **默认关系类型**：`RelationType.ONE_TO_ONE` 作默认，旧文件 UNKNOWN 也回退（29 节）。
 - **连线配色**（`KanbanBoard.CONNECTION_COLOR_PALETTE`，2026-09-24 用户指定的 light/dark 两套色，用 `JBColor` 一个元素挂两版，
-  按顺序循环分配，周期 6）：紫 `#E2D5FF`/`#4A3B6E`、蓝 `#D1E4FF`/`#2A4A75`、绿 `#D0F0D9`/`#2A5A3A`、
-  橙 `#FFEBCC`/`#6E4A2A`、青 `#D6FAFF`/`#2A6E75`、粉 `#FBE2FF`/`#6E2A75`。
+  按顺序循环分配，周期 6）：浅色版**已整体压暗 12.5%**（各通道 ×0.875，保持色相）—— 紫 `#C6BADF`、蓝 `#B7C8DF`、
+  绿 `#B6D2BE`、橙 `#DFCEB2`、青 `#BBDBDF`、粉 `#DCC6DF`；深色版用原始值 —— 紫 `#4A3B6E`、蓝 `#2A4A75`、
+  绿 `#2A5A3A`、橙 `#6E4A2A`、青 `#2A6E75`、粉 `#6E2A75`。要再调亮度就整体乘系数换算，别单通道手改（会跑色相）。
   用 `JBColor` 是因为主题开关没有传到 `Connection.draw(Graphics2D)`，这样连线色与卡片/画布共用同一次主题判定。
-- **拖线的行高亮色按用途拆开**（同一个色不能既当细线又当整行背景）：预览**线** `CONNECTION_PREVIEW_COLOR`
-  (`#757575`/`#AAAAAA`)、起点**行背景** `CONNECTION_SOURCE_PREVIEW_COLOR` (`#D5DDE6`/`#4A5560`，2026-09-24 新增，
-  原来误用预览线的深灰 → 用户反馈"太黑了")、目标**行背景** `CONNECTION_TARGET_PREVIEW_COLOR` (`#BFE8C5`/`#33553F`)。
-  选色基准：卡片底色 `KanbanCard.BG_LIGHT=#FFFFFF` / `BG_DARK=#3C3F41`。
+- **拖线预览 = 即将分配到的连线色**（2026-09-24 定稿）：`peekNextConnectionColor()` 取
+  `CONNECTION_COLOR_PALETTE[connectionColorIndex % len]`（拖拽期间 index 不变，所以预取即最终色），
+  预览线 / 起点行 / 目标行三处统一用它 → 松手前后不跳色，同时保留"连一次换一个颜色"。
+  被取代的三个常量 `CONNECTION_PREVIEW_COLOR`(`#757575`/`#AAAAAA`)、`CONNECTION_SOURCE_PREVIEW_COLOR`(`#D5DDE6`/`#4A5560`)、
+  `CONNECTION_TARGET_PREVIEW_COLOR`(`#BFE8C5`/`#33553F`) **有意保留**（`@SuppressWarnings("unused")`），要回老行为就换回去。
+  老规律仍成立：同一个色值不能既当"细线"又当"整行背景"。详见 34 节末尾。
   ⚠️ 同一组颜色**兼作"连线占用行"的行背景色**（`computeLinkedRows` → `Connection.getResolvedLineColor()`），
   所以必须保持**低饱和浅色**，不能换成高饱和线框色；颜色不写入 .datachart（加载时重新分配）。详见 34 节末尾。
 - **扩展名常量**：`DataToolsFileType.EXTENSION = "datachart"`，不要硬编码（9 节）。

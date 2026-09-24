@@ -15,8 +15,13 @@ import java.awt.geom.Point2D;
  */
 public class Connection {
 
-	/** 默认线宽（从 1.6 调到 2.4，更明显） */
-	private static final float DEFAULT_STROKE_WIDTH = 2.4f;
+	/**
+	 * 默认线宽（从 1.6 调到 2.4，更明显）。
+	 *
+	 * <p>2026-09-24 由 {@code private} 改为 {@code public}：{@link KanbanBoard} 画"连线预览"时也复用它 ——
+	 * 预览线原来写死 1.6f，颜色统一之后宽度还差一档，拖拽松手会看到线"变粗"一下（用户要求完全一致）。</p>
+	 */
+	public static final float DEFAULT_STROKE_WIDTH = 2.4f;
 
 	/** 起点/终点水平引出线长度下限（画板坐标，px） */
 	private static final double LEAD_MIN = 24.0;

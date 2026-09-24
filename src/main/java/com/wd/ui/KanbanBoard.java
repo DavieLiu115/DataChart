@@ -173,14 +173,19 @@ public class KanbanBoard extends JPanel {
 	 * <p>2026-09-24 换色（用户给定色组）：用 {@link JBColor} 一个元素同时挂<b>浅色 / 深色</b>两版 ——
 	 * 浅色主题用低饱和浅色，深色主题用同色相的深色，这样切主题不用改 palette，连线与行背景都自动跟着走。</p>
 	 *
+	 * <p>浅色版后来又按用户要求<b>整体压暗 12.5%</b>（各通道 ×0.875，色相不变）——
+	 * 原始给定值（`#E2D5FF` / `#D1E4FF` / `#D0F0D9` / `#FFEBCC` / `#D6FAFF` / `#FBE2FF`）太接近白，
+	 * 当 2.4px 的线画在浅灰画布上几乎看不见。压暗后 YIQ 亮度仍在 194~210（>128 属浅色），
+	 * 所以当"连线占用行"的行背景照样垫得住正文。</p>
+	 *
 	 * <table>
-	 *   <tr><th>色相</th><th>浅色</th><th>深色</th></tr>
-	 *   <tr><td>紫</td><td>#E2D5FF</td><td>#4A3B6E</td></tr>
-	 *   <tr><td>蓝</td><td>#D1E4FF</td><td>#2A4A75</td></tr>
-	 *   <tr><td>绿</td><td>#D0F0D9</td><td>#2A5A3A</td></tr>
-	 *   <tr><td>橙</td><td>#FFEBCC</td><td>#6E4A2A</td></tr>
-	 *   <tr><td>青</td><td>#D6FAFF</td><td>#2A6E75</td></tr>
-	 *   <tr><td>粉</td><td>#FBE2FF</td><td>#6E2A75</td></tr>
+	 *   <tr><th>色相</th><th>浅色（压暗后）</th><th>深色</th></tr>
+	 *   <tr><td>紫</td><td>#C6BADF</td><td>#4A3B6E</td></tr>
+	 *   <tr><td>蓝</td><td>#B7C8DF</td><td>#2A4A75</td></tr>
+	 *   <tr><td>绿</td><td>#B6D2BE</td><td>#2A5A3A</td></tr>
+	 *   <tr><td>橙</td><td>#DFCEB2</td><td>#6E4A2A</td></tr>
+	 *   <tr><td>青</td><td>#BBDBDF</td><td>#2A6E75</td></tr>
+	 *   <tr><td>粉</td><td>#DCC6DF</td><td>#6E2A75</td></tr>
 	 * </table>
 	 *
 	 * <p>⚠️ 这组颜色<b>同时</b>用作"连线占用行"的行背景（见 {@link #computeLinkedRows()}：
@@ -193,12 +198,12 @@ public class KanbanBoard extends JPanel {
 	 * 所以连线颜色跟着主题自动切换，和卡片/画布保持同一次判定。</p>
 	 */
 	private static final Color[] CONNECTION_COLOR_PALETTE = {
-			new JBColor(new Color(0xE2D5FF), new Color(0x4A3B6E)), // 紫
-			new JBColor(new Color(0xD1E4FF), new Color(0x2A4A75)), // 蓝
-			new JBColor(new Color(0xD0F0D9), new Color(0x2A5A3A)), // 绿
-			new JBColor(new Color(0xFFEBCC), new Color(0x6E4A2A)), // 橙
-			new JBColor(new Color(0xD6FAFF), new Color(0x2A6E75)), // 青
-			new JBColor(new Color(0xFBE2FF), new Color(0x6E2A75))  // 粉
+			new JBColor(new Color(0xC6BADF), new Color(0x4A3B6E)), // 紫
+			new JBColor(new Color(0xB7C8DF), new Color(0x2A4A75)), // 蓝
+			new JBColor(new Color(0xB6D2BE), new Color(0x2A5A3A)), // 绿
+			new JBColor(new Color(0xDFCEB2), new Color(0x6E4A2A)), // 橙
+			new JBColor(new Color(0xBBDBDF), new Color(0x2A6E75)), // 青
+			new JBColor(new Color(0xDCC6DF), new Color(0x6E2A75))  // 粉
 	};
 
 	/** 当前连线颜色索引（循环分配） */
@@ -210,35 +215,60 @@ public class KanbanBoard extends JPanel {
 	/** 关联列高亮颜色（选中某列时，与之有连线的另一列也用此色高亮） */
 	private static final Color RELATED_ROW_COLOR = new Color(0xFD9933);
 
-	/** 连线模式临时预览颜色（2026-08-04 由粉色改为深灰色，浅色主题深灰 / 深色主题浅灰） */
+	/**
+	 * 连线模式临时预览色 —— <b>2026-09-24 起不再使用</b>，见 {@link #peekNextConnectionColor()}。
+	 *
+	 * <p>历史演变：2026-08-04 由粉色改为深灰色（避免与 palette 里的粉紫系混淆）；
+	 * 2026-09-24 先给起点行单独拆了浅色（{@link #CONNECTION_SOURCE_PREVIEW_COLOR}），
+	 * 随后用户指出"连过去是绿的、一松手变成蓝色" → 预览统一改用<b>这条新连线即将分配到的 palette 色</b>，
+	 * 松手前后颜色完全不跳。</p>
+	 *
+	 * <p>三个常量有意保留：要回到"预览色独立于最终色"的老行为，
+	 * 把 {@code mouseDragged} 与预览线绘制处的 {@code peekNextConnectionColor()} 换回它们即可。</p>
+	 */
+	@SuppressWarnings("unused")
 	private static final Color CONNECTION_PREVIEW_COLOR = new JBColor(
 			new Color(0x757575), // 浅色主题：深灰，清晰可见
 			new Color(0xAAAAAA)); // 深色主题：浅灰，避免与暗背景对比不足
 
 	/**
-	 * 连线预览：<b>起点行</b>的高亮色（2026-09-24 新增）。
+	 * 起点行预览高亮色（2026-09-24 曾启用一天，现已被 {@link #peekNextConnectionColor()} 取代）。
 	 *
-	 * <p>原来起点行直接铺 {@link #CONNECTION_PREVIEW_COLOR}（浅色主题 {@code #757575} 深灰）——
-	 * 那是画 2.4px 细线用的颜色，铺满整行后太黑，把行内的列名 / 注释 / 类型全压住了（用户反馈"太黑了"）。
-	 * 现在按用途拆开：<b>线</b>用深灰预览色（细线需要对比度），<b>行背景</b>用这组浅色。</p>
+	 * <p>它解决的是"起点行直接铺深灰预览线色 → 整行太黑压住文字"（用户："太黑了"）；
+	 * 现在起点行改用即将分配的 palette 色，浅色主题下同样是浅色，且松手后不会变。</p>
 	 *
-	 * <p>与目标行的 {@link #CONNECTION_TARGET_PREVIEW_COLOR}（淡绿）配套成"起点灰、落点绿"：
-	 * 浅色主题用浅灰蓝（垫得住 {@code #333} 文字，卡片底色是纯白），
-	 * 深色主题用略亮于卡片底（{@code #3C3F41}）的暗灰蓝，暗底上能看出但不会亮得刺眼。</p>
+	 * @see #CONNECTION_PREVIEW_COLOR
 	 */
+	@SuppressWarnings("unused")
 	private static final Color CONNECTION_SOURCE_PREVIEW_COLOR = new JBColor(
 			new Color(0xD5DDE6), // 浅色主题：浅灰蓝
 			new Color(0x4A5560)); // 深色主题：暗灰蓝
 
 	/**
-	 * 连线预览：目标行"落点"高亮色（2026-09-16）。
+	 * 目标行"落点"高亮色（2026-09-16 引入，2026-09-24 起不再使用）。
 	 *
-	 * <p>拖线悬停到哪一行，哪一行背景亮起浅绿色（深色主题用深绿），
-	 * 与预览线的灰色区分开，明确指示"松手后连线将落到这一行"。</p>
+	 * <p>当初用淡绿是为了和预览线的灰色区分、提示"松手后线会落到这一行"；
+	 * 现在目标行同样改用即将分配的 palette 色 —— 落点提示靠"整行被点亮"本身表达，
+	 * 颜色则与最终结果保持一致。</p>
+	 *
+	 * @see #CONNECTION_PREVIEW_COLOR
 	 */
+	@SuppressWarnings("unused")
 	private static final Color CONNECTION_TARGET_PREVIEW_COLOR = new JBColor(
 			new Color(0xBFE8C5), // 浅色主题：淡绿（与"同步新增列"高亮风格一致）
 			new Color(0x33553F)); // 深色主题：深绿
+
+	/**
+	 * 预览"这条新连线将会拿到的颜色"。
+	 *
+	 * <p>拖拽期间 {@link #connectionColorIndex} <b>不会变</b>（只有 {@link #addConnection} 里才自增），
+	 * 所以这里预取的就是松手建线时分配到的同一个颜色。预览线、起点行、目标行都用它 →
+	 * 松手前后颜色<b>完全不跳</b>（用户反馈："连过去是绿的，一松手变成蓝色了，颜色保持一致"），
+	 * 同时仍然保留"每条连线颜色不同、连一次换一个色"的既有行为。</p>
+	 */
+	private Color peekNextConnectionColor() {
+		return CONNECTION_COLOR_PALETTE[connectionColorIndex % CONNECTION_COLOR_PALETTE.length];
+	}
 
 	/** 对齐辅助线颜色（深色主题下稍亮，浅色主题下稍深） */
 	private static final Color ALIGN_GUIDE_COLOR_LIGHT = new Color(0xFE9933);
@@ -550,20 +580,21 @@ public class KanbanBoard extends JPanel {
 					KanbanCard targetCard = findCardAt(e.getPoint());
 					previewHighlightRows.clear();
 					if (connectionSource != null) {
-						// 起点行铺浅灰蓝（不是预览线的深灰）—— 见 CONNECTION_SOURCE_PREVIEW_COLOR
+						// 起点行铺"这条新连线即将分配到的颜色" —— 与松手后的行背景同色，不会跳变
 						previewHighlightRows
 								.computeIfAbsent(connectionSource, k -> new HashMap<>())
-								.put(connectionSourceRow, CONNECTION_SOURCE_PREVIEW_COLOR);
+								.put(connectionSourceRow, peekNextConnectionColor());
 					}
 					if (targetCard != null && targetCard != connectionSource) {
 						Point2D tp = viewport.transformPoint(e.getPoint());
 						int targetRow = targetCard.getRowIndexAt(tp.getX(), tp.getY());
 						if (targetRow >= 0) {
-							// 目标行"落点"高亮（2026-09-16）：拖到哪行哪行亮（浅绿），
-							// 与预览线灰色区分，明确指示松手后连线将落在这一行
+							// 目标行"落点"高亮：拖到哪行哪行亮。
+							// 2026-09-24 起颜色改用"这条新连线即将分配到的颜色"（原来固定淡绿）——
+							// 否则松手后整行由绿变 palette 色，视觉上是"闪了一下"（用户反馈）
 							previewHighlightRows
 									.computeIfAbsent(targetCard, k -> new HashMap<>())
-									.put(targetRow, CONNECTION_TARGET_PREVIEW_COLOR);
+									.put(targetRow, peekNextConnectionColor());
 							// 2026-08-04：记录最后一次 hover 的目标，
 							// 让 mouseReleased 即使松手在空白处也能建线
 							lastHoverTargetCard = targetCard;
@@ -1373,8 +1404,12 @@ public class KanbanBoard extends JPanel {
 		if (isConnecting && connectionSource != null && connectionCurrentPoint != null) {
 			Point2D sourcePoint = connectionSource.getRowRight(connectionSourceRow);
 			if (sourcePoint != null) {
-				g2d.setColor(CONNECTION_PREVIEW_COLOR);
-				g2d.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+				// 2026-09-24：预览线也用"这条新连线即将分配到的颜色"（原来是固定深灰），
+				// 松手建线后线的颜色不再变化。
+				// 线宽同样复用 Connection.DEFAULT_STROKE_WIDTH（原来写死 1.6f，松手时会变粗一下）
+				g2d.setColor(peekNextConnectionColor());
+				g2d.setStroke(new BasicStroke(Connection.DEFAULT_STROKE_WIDTH,
+						BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
 				double dx = Math.abs(connectionCurrentPoint.getX() - sourcePoint.getX());
 				double ctrlX1 = sourcePoint.getX() + dx / 2.0;
 				double ctrlY1 = sourcePoint.getY();
