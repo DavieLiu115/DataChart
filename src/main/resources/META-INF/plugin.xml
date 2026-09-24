@@ -56,15 +56,16 @@
                 implementationClass="com.wd.editor.DataToolsFileType"
                 fieldName="INSTANCE_C"/>
 
-        <!-- 编辑器两个 Tab（顺序即这里的声明顺序）：
-             ① Board：图形看板（自定义 FileEditor，隐藏平台默认文本编辑器）
-             ② Text：JSON 高亮的文本编辑器（LightVirtualFile + JsonFileType，参考 YamlHelper） -->
+        <!-- 编辑器两个 Tab：
+             ① Board：图形看板（本插件 FileEditor）—— PLACE_BEFORE_DEFAULT_EDITOR 让它排在默认 Text Tab 之前且默认激活
+             ② Text：平台默认文本编辑器，JSON 高亮由下面给 dataChart 语言注册的高亮工厂提供 -->
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
-        <fileEditorProvider implementation="com.wd.editor.DataChartTextEditorProvider"/>
 
-        <!-- 抑制平台默认文本编辑器对 .datachart 生效：它的 Tab 也叫 "Text"，
-             会与插件自己实现的 JSON 高亮 Text Tab 重名（HIDE_DEFAULT_EDITOR 挡不住它） -->
-        <fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
+        <!-- 让平台文本编辑器对 .datachart 显示出 JSON 语法高亮：
+             给自定义语言 dataChart 借用平台 JSON 的高亮实现。
+             ⚠️ 这里刻意不改 fileType 的 language —— 改语言会影响文件识别（曾经导致项目视图不显示 .datachart） -->
+        <lang.syntaxHighlighterFactory language="dataChart"
+                implementationClass="com.wd.editor.DataChartSyntaxHighlighterFactory"/>
 
         <internalFileTemplate name="DataChart"/>
 
@@ -74,4 +75,14 @@
         <notificationGroup id="DataChart" displayType="BALLOON"
                 bundle="messages.DataChartBoundle" key="DataChart.notification.group"/>
     </extensions>
+
+    <actions>
+        <!-- Text Tab 里手动格式化 JSON：自定义语言没有注册 formatter，
+             平台自带的 Reformat Code 对它无效，所以自带一个（复用保存时的重排逻辑） -->
+        <action id="DataChart.FormatJson" class="com.wd.editor.FormatJsonAction"
+                text="%DataChart.action.formatJson">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift L"/>
+        </action>
+    </actions>
 </idea-plugin>

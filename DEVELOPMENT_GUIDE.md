@@ -1403,9 +1403,10 @@ enabled = ReadAction.compute(() -> {
 
 ### 50. `.datachart` 编辑器双 Tab：图形 + Text（2026-09-24，参考 PYYP）
 
-> ⚠️ **最终形态见本节末尾「最终形态」**：Text Tab 最终由插件自己实现（JSON 高亮），
-> 而不是用平台默认文本编辑器 —— 下面的 `PLACE_BEFORE_DEFAULT_EDITOR` 方案只保留了
-> `EditorFileSync` / `EditorSaveAllHook` 这两块机制，policy 已改回 `HIDE_DEFAULT_EDITOR`。
+> ⚠️ 本节记录了演进与踩坑过程，**当前生效方案见末尾「✅ 当前方案（2026-09-24 定稿）」**：
+> ① 单 provider + 平台 Text Tab（无高亮）→ ② 两个自定义 provider + suppressor（Tab 顺序不可控，Text 在左）
+> → ③ 语言继承 `JsonLanguage`（**实测导致项目视图不显示 .datachart，已回退**）
+> → ④ **当前：单 provider + `PLACE_BEFORE_DEFAULT_EDITOR` + 给 dataChart 语言注册 JSON 高亮工厂**。
 
 #### 需求
 打开 `.datachart` 时编辑器顶部出现两个 Tab：左边是图形看板（默认激活），右边是 IDEA 默认的
@@ -1581,4 +1582,56 @@ public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
 `isDocumentUnsaved` 检查会自然跳过，逻辑依旧安全（保留作为兜底）。
 ⚠️ 教训：平台的「默认编辑器」有两条链路（`DefaultPlatformFileEditorProvider` 与
 `TextEditorProvider` 系），`FileEditorPolicy` 只能影响前者；要精准干掉某个 provider，用 suppressor。
+
+#### ✅ 当前方案（2026-09-24 定稿）：单 provider + 平台 Text Tab + 给语言挂 JSON 高亮
+
+**目标**：`Board | Text` 两个 Tab，Board 在左且默认激活，Text 有 JSON 高亮（可手动格式化）。
+
+**结构**（只有一个自定义 `FileEditorProvider`）：
+
+| Tab | 来源 | 说明 |
+| --- | --- | --- |
+| Board | `DataChartEditorProvider` | `FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR` → 排在默认 Text Tab 之前且默认激活 |
+| Text | 平台默认文本编辑器（`PsiAwareTextEditorProvider`） | Tab 名由平台给（Text / 文本） |
+
+1. **顺序交给 `PLACE_BEFORE_DEFAULT_EDITOR`** —— 平台专门处理「自定义 editor 相对默认 editor 的位置」；
+   多个自定义 provider 之间的顺序平台**不保证**（见上面「坑：多出来的第二个 Text Tab」与
+   `order` 属性无效的实测结论）。
+2. **JSON 高亮**：不改 fileType 的 language，而是**给自定义语言注册一个高亮工厂**：
+
+```xml
+<lang.syntaxHighlighterFactory language="dataChart"
+        implementationClass="com.wd.editor.DataChartSyntaxHighlighterFactory"/>
+```
+
+```java
+// DataChartSyntaxHighlighterFactory：借平台 JSON 语言的高亮实现
+SyntaxHighlighter highlighter = SyntaxHighlighterFactory
+        .getSyntaxHighlighter(JsonLanguage.INSTANCE, project, virtualFile);
+return highlighter != null ? highlighter : new PlainSyntaxHighlighter();
+```
+
+   ⚠️ 不要写 `super.getSyntaxHighlighter(...)` —— `SyntaxHighlighterFactory` 里那个方法是**抽象**的，
+   `super.` 调用编译不过（本次踩到）。平台 API 是
+   `SyntaxHighlighterFactory.getSyntaxHighlighter(Language, Project, VirtualFile)`（静态）。
+3. **手动格式化**：自定义语言没有注册 formatter，平台自带的 Reformat Code 对它无效 →
+   自带 `FormatJsonAction`（`EditorPopupMenu` 菜单项「Format JSON」+ 快捷键 `Ctrl+Alt+Shift+L`），
+   复用 `ChartJsonUtil.prettifyText`（只改空白）。
+
+**⚠️ 为什么不把语言改成 JSON、也不让 `DataChart extends JsonLanguage`**：
+实测会让**项目视图不显示 .datachart 文件**（文件识别层面出问题），已回退。
+要"借某个语言的能力"，正确姿势是**给当前语言注册对应语言的 EP**（高亮工厂 / formatter 等），
+而不是改文件的语言归属。
+
+**保留的机制**（这些没变，仍然有效）：`EditorFileSync`（VFS 监听 + `writeContent` 双写 VFS/Document；
+自触发事件只能用 `event.getRequestor() == owner` 识别）、`EditorSaveAllHook`
+（`beforeAllDocumentsSaving` 补位保存画布）、`ChartJsonUtil`（缩进跟随 IDE 的 JSON 代码风格 + `"k": v` +
+`prettifyText` 必须带 `Feature.OrderedField`；打开时自动重排、幂等）。
+
+**删除的类**：`DataChartTextEditor` / `DataChartTextEditorProvider` / `DataChartTextEditorSuppressor`。
+**新增**：`DataChartSyntaxHighlighterFactory`、`FormatJsonAction`，以及 i18n key
+`DataChart.action.formatJson`（Format JSON / 格式化 JSON）。
+
+**验证**：`./gradlew compileJava` 通过；`runIde` 看 ① `Board | Text` 且 Board 默认激活；
+② Text 有 JSON 高亮；③ 右键菜单 / `Ctrl+Alt+Shift+L` 能格式化；④ 两个 Tab 双向同步。
 
