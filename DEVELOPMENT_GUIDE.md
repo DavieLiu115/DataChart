@@ -1632,6 +1632,125 @@ return highlighter != null ? highlighter : new PlainSyntaxHighlighter();
 **新增**：`DataChartSyntaxHighlighterFactory`、`FormatJsonAction`，以及 i18n key
 `DataChart.action.formatJson`（Format JSON / 格式化 JSON）。
 
+4. **属性键颜色**（`"key": value` 里的 key 应该是紫色，和字符串值区分开）：
+   JSON 的键色**不是 token 级高亮**，而是由
+   `com.intellij.json.highlighting.JsonRainbowVisitor` 调 `JSON_PROPERTY_KEY` 标出来的 ——
+   它注册在 `language="JSON"` 上、而且是 **`final` 类**（`suitableForFile` 拒绝非 JSON 语言），
+   所以借 `syntaxHighlighterFactory` 只能借到"字符串/关键字/数字"这些 token 色，
+   键名会跟字符串值**同色（都绿）**。
+   → 自带 `DataChartJsonKeyAnnotator` 补上：
+
+```xml
+<annotator language="dataChart"
+        implementationClass="com.wd.editor.DataChartJsonKeyAnnotator"/>
+```
+```java
+// JSON 里"字符串后紧跟冒号（中间只允许空白）"就是属性键；文本扫描即可，
+// 标成 JsonSyntaxHighlighterFactory.JSON_PROPERTY_KEY（颜色跟随主题 / Color Scheme 里的 JSON 配置）
+holder.newSilentAnnotation(HighlightSeverity.INFORMATION)
+      .range(range).textAttributes(JsonSyntaxHighlighterFactory.JSON_PROPERTY_KEY).create();
+```
+   ⚠️ annotator 会按 PSI 元素逐个调用，**扫描必须限定在 `element instanceof PsiFile`**，
+   否则会对整个文件重复扫 N 遍。
+   ✅ 实测 annotator **确实不会跑**（没有 ParserDefinition 时文件是 plain PSI，daemon 不调注解器）→
+   已补上自己的 ParserDefinition：
+
+```xml
+<lang.parserDefinition language="dataChart"
+        implementationClass="com.wd.editor.DataChartJsonParserDefinition"/>
+```
+```java
+// 继承平台 JSON 的 ParserDefinition（语言无关实现：JsonLexer + JsonElementTypes），
+// 只覆盖 createFile 换成我们自己的语言 —— 父类里硬编码了 JsonLanguage.INSTANCE，
+// 直接用会让 PsiFile 的语言与 FileType 的语言不一致
+public class DataChartJsonParserDefinition extends JsonParserDefinition {
+    @Override
+    public @NotNull PsiFile createFile(@NotNull FileViewProvider viewProvider) {
+        return new JsonFileImpl(viewProvider, DataChart.INSTANCE_C);
+    }
+}
+```
+
+   ⚠️ **注意 token 与 PSI 的分工**：`MyHighlighter` 的映射表里
+   `JsonElementTypes.IDENTIFIER → JSON_IDENTIFIER`、`DOUBLE_QUOTED_STRING → JSON_STRING`，
+   **`JSON_PROPERTY_KEY` 不在 token 映射里**（只有 `JsonRainbowVisitor` / `JsonLiteralAnnotator` /
+   `JsonColorsPage` 引用它）—— 所以"键色"**只能在 PSI/注解层做**，
+   想靠"自定义 lexer 把 key token 改成 IDENTIFIER"是没用的（那会得到 `JSON_IDENTIFIER` 色，不是键色）。
+
 **验证**：`./gradlew compileJava` 通过；`runIde` 看 ① `Board | Text` 且 Board 默认激活；
-② Text 有 JSON 高亮；③ 右键菜单 / `Ctrl+Alt+Shift+L` 能格式化；④ 两个 Tab 双向同步。
+② Text 有 JSON 高亮（键名紫色、字符串绿色、`true/false` 蓝色）；③ 右键菜单 / `Ctrl+Alt+Shift+L` 能格式化；
+④ 两个 Tab 双向同步。
+
+#### ✅✅ 最终方案（2026-09-24 定稿）：编辑器**内部页签**（JBTabs）
+
+前面几版都卡在同一件事上：**IDE 层面的"多编辑器 Tab 顺序"插件控制不了**
+（`PLACE_BEFORE/AFTER_DEFAULT_EDITOR` 平台没有任何代码处理、`order` 属性实测无效、
+provider 列表还走协程并发创建）。所以把 Board / Text 下沉为**同一个 FileEditor 内部的两个页签**：
+
+- `DataChartEditorProvider` 的 policy = **`HIDE_OTHER_EDITORS`** → 隐藏平台自带文本编辑器等，
+  IDE 层面只剩我们这一个 tab（tab 名用文件名）；
+- `DataChartEditor` 内部用 `JBTabsFactory.createTabs(project, this)`：
+
+| 内部页签 | 内容 | 实现 |
+| --- | --- | --- |
+| **Board**（默认选中） | 图形看板 | `DataChartView.getRootComponent()`（原样） |
+| **Text** | JSON 高亮编辑器 | `DataChartJsonPanel` |
+
+顺序与默认页 100% 由代码控制 ✅ —— 这正是前面几版做不到的。
+
+**Text 页为什么高亮完美**（`DataChartJsonPanel`，即之前"两个 provider"那版的同一个做法）：
+内容放在 `new LightVirtualFile(name + ".json", JsonFileType.INSTANCE, text)` 里，
+编辑器的**文件就是 JSON 语言** → JSON 的全套机制生效：token 高亮 **+ PSI 层的
+`JsonRainbowVisitor`（属性键紫色）** + `Ctrl+Alt+L` 格式化 + 语法校验 + Structure View。
+（反过来看，"单 provider + 平台文本编辑器"只能借到 token 色 —— 键色在 PSI 层，
+而 `.datachart` 的语言是自定义的 `dataChart`，借不过来；给 dataChart 挂
+syntaxHighlighterFactory/annotator/ParserDefinition 那套也因此全部删除。）
+
+**保存与同步**（`DataChartEditor` + `DataChartJsonPanel` + `EditorFileSync`）：
+- `saveDocument()` 保存**当前显示的那一页**（Board → 序列化看板；Text → 写回文本）；
+- **切换页签时先保存"离开的那一页"**，保证两端看到同一份内容；
+- 平台 Cmd/Ctrl+S 由 `EditorSaveAllHook`（`beforeAllDocumentsSaving`）补位；
+- 外部改动（Git、其它工具、另一端保存）由 `EditorFileSync` 的 VFS 监听触发重载；
+- 打开文件时若磁盘还是紧凑 JSON，仍由 `prettifyFileIfNeeded` 自动重排为多行。
+
+**随之删除**：`DataChartSyntaxHighlighterFactory` / `DataChartJsonKeyAnnotator` /
+`DataChartJsonParserDefinition` / `FormatJsonAction`，以及 plugin.xml 里的
+`<lang.syntaxHighlighterFactory>` / `<annotator>` / `<lang.parserDefinition>` / `<actions>` 注册
+（Text 页是 JSON 语言，平台的 Reformat Code 直接可用）。
+
+**验证**：`runIde` 看 ① IDE 层只有一个 tab（文件名）；② 编辑器内 `Board | Text`，Board 在左且默认选中；
+③ Text 高亮与 .json 文件一致（键名紫、字符串绿、`true/false` 蓝）；④ 切页签 / Cmd+S / 双向同步正常。
+
+#### 补充：平台自带的 Text Tab 必须用 `FileEditorProviderSuppressor` 抑制（2026-09-24）
+
+**现象**：内部页签做完后，IDE 层面仍出现 `<文件名> | Text` 两个 tab；点开 "Text" 那个是**纯黑白文本**，
+非常容易被误判成"我们自己的 Text 页没有高亮"。
+
+**根因**：那个 Text tab 是**平台自带的文本编辑器**（`PsiAwareTextEditorProvider`）。
+它按文件语言（我们自定义的 `dataChart`）渲染，而该语言没注册词法 / 高亮 → 纯文本。
+`FileEditorPolicy.HIDE_OTHER_EDITORS`（和 `HIDE_DEFAULT_EDITOR`）**都挡不住它**：
+`FileEditorProviderManagerImpl.postProcessResult` 只有两个 removeIf 分支
+（`HIDE_DEFAULT_EDITOR` 的谓词是 `it is DefaultPlatformFileEditorProvider`），
+而 `PsiAwareTextEditorProvider` 是**独立 EP 注册**的（`META-INF/LangExtensions.xml`，id `text-editor`、
+`order="first"`），不在这些分支的处理范围内。
+
+**解法**：`FileEditorProviderSuppressor`（EP `com.intellij.fileEditorProviderSuppressor`）：
+
+```xml
+<fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
+```
+
+```java
+public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
+                            @NotNull FileEditorProvider provider) {
+    // 只对 .datachart 抑制平台文本编辑器；插件自己的编辑器（Board/Text 都在其内部）不受影响
+    return DataToolsFileType.EXTENSION.equalsIgnoreCase(file.getExtension())
+            && provider instanceof TextEditorProvider;
+}
+```
+
+⚠️ 该 EP 是**全局注册**的，实现里必须自己按文件类型过滤，否则会把所有文件的文本编辑器都干掉。
+
+**判定经验**：`.datachart` 一旦出现多余/同名的 tab、且其中一个是纯文本，
+先怀疑"平台的 `PsiAwareTextEditorProvider` 没被抑制"，而不是先怀疑自己的高亮代码。
 

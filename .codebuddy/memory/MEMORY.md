@@ -76,27 +76,33 @@
 - **菜单 hover 整行变粉（macOS 强调色）→ 必须完全自绘**：IntelliJ 的 `BegMenuItemUI`/`IdeaMenuUI` 在 `installDefaults()` 用 `JBColor.namedColor(...)` 覆盖 `selectionBackground` 且**全局缓存**，`UIManager.put` 与 client property 全部无效，`IdeaMenuUI.fillBackground()` 的 hover 填充也不受 `isOpaque()` 控制。**唯一可靠解**：`BoardContextMenu` 的 `FlatMenuItem`/`FlatMenu`/`FlatCheckBoxMenuItem` 自绘（`paintComponent` 不调 `super`），共用 `paintMenuRow`/`menuRowPreferredSize`，配色只用 `JBColor`，并自己重写 `getPreferredSize()`（46 节）。
 - 调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
 
-### 11. `.datachart` 编辑器双 Tab：Board（图形）+ Text（2026-09-24 定稿）
+### 11. `.datachart` 编辑器：Board（图形）+ Text（JSON 高亮）双页签（2026-09-24 定稿）
 - **用户偏好（明确要求）**：**不要**改 `.datachart` 的 fileType 语言（保留自定义语言类 `com.wd.editor.DataChart`、Board 行为不变）。
   曾用 `DataChart extends JsonLanguage` 借 JSON 能力 → **实测导致项目视图不显示 .datachart，已回退**。
-- **定稿方案（单 provider）**：
-  - `DataChartEditorProvider`（Board）用 `FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR` → 稳定排在默认 Text Tab 之前且默认激活；
-  - Text Tab = 平台默认文本编辑器；**JSON 高亮**靠给自定义语言注册高亮工厂：
-    `<lang.syntaxHighlighterFactory language="dataChart" implementationClass="com.wd.editor.DataChartSyntaxHighlighterFactory"/>`，
-    实现里用 `SyntaxHighlighterFactory.getSyntaxHighlighter(JsonLanguage.INSTANCE, project, file)`（⚠️ 不能用 `super.`，该方法是抽象）；
-  - 手动格式化：自定义语言没 formatter → 自带 `FormatJsonAction`（`EditorPopupMenu`「Format JSON」+ `Ctrl+Alt+Shift+L`），复用 `ChartJsonUtil.prettifyText`。
-  - 删除 `DataChartTextEditor` / `DataChartTextEditorProvider` / `DataChartTextEditorSuppressor`。
-- **教训（Tab 顺序）**：多个自定义 `FileEditorProvider` 之间的 Tab 顺序**平台不保证**（`order="first"/"last"` 与声明顺序实测都无效）。
-  要控制相对位置就用 `PLACE_BEFORE/AFTER_DEFAULT_EDITOR`；第二个视图靠"给同一文件的语言挂能力"实现，而不是再注册一个 provider。
-- **教训（借语言能力的方式）**：不要改文件的语言归属（`LanguageFileType` 的 language / 继承 JsonLanguage）——会影响文件识别
-  （项目视图不显示 .datachart）；正确做法是给当前语言注册对应语言的 EP（syntaxHighlighterFactory / formatter 等）。
-- **`HIDE_DEFAULT_EDITOR` 挡不住平台文本编辑器**（反编译 `FileEditorProviderManagerImpl.postProcessResult`：谓词是
-  `it is DefaultPlatformFileEditorProvider`）；平台的 "Text" Tab 来自独立 EP 的 `PsiAwareTextEditorProvider`（`id="text-editor" order="first"`）。
-  要精准抑制得用 `FileEditorProviderSuppressor`（带 project/file 参数，⚠️ 全局 EP，必须自己按文件过滤）。
-- **保留的机制**：`EditorFileSync`（VFS_CHANGES 监听 + `writeContent` 双写 VFS/Document；自触发事件**只能用
+- **定稿：编辑器内部页签（JBTabs），IDE 层只有一个 tab**
+  - `DataChartEditorProvider` policy = `HIDE_OTHER_EDITORS`（隐藏平台自带文本编辑器等；IDE 层只剩我们一个 tab，tab 名用文件名）；
+  - `DataChartEditor` 内部 `JBTabsFactory.createTabs(project, this)`：**Board 页**（`DataChartView`，默认选中）+ **Text 页**（`DataChartJsonPanel`）；
+  - **Text 页高亮为什么完美**：内容放在 `new LightVirtualFile(name + ".json", JsonFileType.INSTANCE, text)` 里 →
+    编辑器的**文件就是 JSON 语言** → JSON 全套机制生效（token 高亮 + PSI 层 `JsonRainbowVisitor` 的**属性键紫色** +
+    `Ctrl+Alt+L` 格式化 + 校验 + Structure View）；
+  - 保存：`saveDocument()` 保存**当前页**；**切换页签先保存离开的那一页**；平台 Cmd+S 由 `EditorSaveAllHook` 补位；
+    外部改动由 `EditorFileSync` 触发重载；打开时紧凑 JSON 仍由 `prettifyFileIfNeeded` 自动重排。
+- **为什么必须下沉到编辑器内部**：IDE 层面的多编辑器 Tab 顺序插件控制不了 —— 反编译确认
+  `PLACE_BEFORE/AFTER_DEFAULT_EDITOR` **平台没有任何代码读取**（全 jar 只有 `DiffPatchFileEditorProvider` /
+  `PerspectiveFileEditorProvider` 声明使用），EP 的 `order="first"/"last"` 实测无效，
+  平台 text provider 自己 `order="first"` 且 provider 列表走协程（`filterableLazySequence`）。
+- **其它反编译结论**：`HIDE_DEFAULT_EDITOR` 只移除 `DefaultPlatformFileEditorProvider`（`postProcessResult` 的谓词），
+  挡不住 `PsiAwareTextEditorProvider`（要精准抑制用 `FileEditorProviderSuppressor`，带 project/file 参数，⚠️ 全局 EP 需自己过滤）；
+  `JSON_PROPERTY_KEY` **不在** `MyHighlighter` 的 token 映射表里（`IDENTIFIER→JSON_IDENTIFIER`、`DOUBLE_QUOTED_STRING→JSON_STRING`）
+  → 键色只能在 PSI 层拿到（自定义 lexer 改 token 类型没用）。
+- **保留的机制**：`EditorFileSync`（VFS 监听 + `writeContent` 双写 VFS/Document；自触发事件**只能用
   `event.getRequestor() == owner`** 识别，事件异步派发、saving/stamp 不可靠；写盘期间 `UndoUtil.disableUndoFor` 隔离撤销栈）、
   `EditorSaveAllHook`（`beforeAllDocumentsSaving` 补位保存画布）、
   `ChartJsonUtil`（缩进跟随 IDE 的 JSON 代码风格 + `"k": v` + `prettifyText` 必须带 `Feature.OrderedField`；打开时自动重排、幂等）。
-- Tab 名：`DataChart.editor.tab.board`（Board / 看板）；Text 名由平台提供（i18n key `DataChart.editor.tab.text` 已无代码引用）。
+- **平台自带的文本编辑器必须用 suppressor 抑制**：`<fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>`
+  （`isSuppressed(Project, VirtualFile, FileEditorProvider)` 带文件参数，只对 .datachart 抑制 `instanceof TextEditorProvider`；
+  ⚠️ 该 EP 全局注册，实现里必须自己按文件类型过滤）。否则 IDE 层会多一个纯文本 "Text" tab（按自定义语言 `dataChart` 渲染、无高亮），
+  极易被误判成"我们的 Text 页没高亮"。`HIDE_DEFAULT_EDITOR` / `HIDE_OTHER_EDITORS` 都挡不住它。
+- 页签名走 i18n：`DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.tab.text`（Text / 文本）。
 - 教训：`loading` 标志要在 `loadFromJson` **之后**解除，否则重建看板的回调会把刚打开的文件标记成已修改。
-- 详见 DEVELOPMENT_GUIDE 第 50 节「✅ 当前方案（2026-09-24 定稿）」。
+- 详见 DEVELOPMENT_GUIDE 第 50 节「✅✅ 最终方案：编辑器内部页签」。

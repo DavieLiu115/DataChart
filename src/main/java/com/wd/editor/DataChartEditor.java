@@ -12,6 +12,10 @@ import com.intellij.openapi.fileEditor.FileEditorState;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.ui.tabs.JBTabs;
+import com.intellij.ui.tabs.JBTabsFactory;
+import com.intellij.ui.tabs.TabInfo;
+import com.intellij.ui.tabs.TabsListener;
 import com.wd.i18n.DataChartBundle;
 import com.wd.model.ChartJsonUtil;
 import com.wd.ui.DataChartView;
@@ -33,6 +37,12 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	private final Project project;
 	private final VirtualFile file;
 	private DataChartView dataView;
+	/** 编辑器内部的页签容器（Board / Text 两个页） */
+	private JBTabs tabs;
+	private TabInfo boardTab;
+	private TabInfo textTab;
+	/** Text 页：JSON 高亮的文本编辑器 */
+	private DataChartJsonPanel jsonPanel;
 	private volatile boolean initialized = false;
 	private boolean modified = false;
 	private volatile boolean loading = false;
@@ -79,6 +89,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		if (!initialized) {
 			synchronized (this) {
 				if (!initialized) {
+					// ---------- Board 页 ----------
 					dataView = new DataChartView(project);
 					// 看板内容变更时标记文件为已修改
 					dataView.setBoardChangeListener(() -> setModified(true));
@@ -86,7 +97,35 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 					dataView.setSaveListener(this::saveDocument);
 					// 暴露当前文件名（用于导出 PDF / 图片的默认文件名）
 					dataView.setBaseFileName(resolveBaseFileName());
-					editorPanel.add(dataView.getRootComponent(), BorderLayout.CENTER);
+
+					// ---------- Text 页（JSON 高亮） ----------
+					jsonPanel = new DataChartJsonPanel(project, file, () -> setModified(true));
+
+					// ---------- 内部页签：Board 在前、默认选中 ----------
+					// 为什么不用两个 FileEditorProvider 做成 IDE 级的两个 Tab：
+					// 平台不保证多个自定义 provider 的顺序（PLACE_BEFORE/AFTER_DEFAULT_EDITOR
+					// 没有任何平台代码处理、EP 的 order 属性实测也无效、provider 还是协程并发创建），
+					// 放到编辑器内部就能 100% 控制顺序与默认页。
+					tabs = JBTabsFactory.createTabs(project, this);
+					boardTab = new TabInfo(dataView.getRootComponent())
+							.setText(DataChartBundle.message("DataChart.editor.tab.board"));
+					textTab = new TabInfo(jsonPanel.getComponent())
+							.setText(DataChartBundle.message("DataChart.editor.tab.text"));
+					tabs.addTab(boardTab);
+					tabs.addTab(textTab);
+					tabs.addListener(new TabsListener() {
+						@Override
+						public void selectionChanged(TabInfo oldSelection, TabInfo newSelection) {
+							// 切换前先保存"离开的那一页"，保证另一页看到的是同一份内容
+							saveTab(oldSelection);
+							if (newSelection == textTab && jsonPanel != null) {
+								jsonPanel.syncFromDiskIfClean();
+							}
+						}
+					});
+					tabs.select(boardTab, false);
+					editorPanel.add(tabs.getComponent(), BorderLayout.CENTER);
+
 					initialized = true;
 					// 打开文件时加载已有内容
 					loadFromFile();
@@ -166,8 +205,8 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	@Override
 	public @NotNull String getName() {
-		// 编辑器 Tab 名（与 PYYP 的 Flow / Text 一致：图形 Tab 在前，IDEA 默认 Text Tab 在后）
-		return DataChartBundle.message("DataChart.editor.tab.board");
+		// IDE 层面的编辑器 Tab 名用文件名；Board / Text 是编辑器内部的页签（见 ensureInitialized）
+		return file == null ? DataChartBundle.message("DataChart.editor.tab.board") : file.getName();
 	}
 
 	/**
@@ -253,12 +292,31 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	}
 
 	/**
-	 * 保存看板内容到文件（Ctrl+S / Command+S 时触发）。
+	 * 保存"当前显示的那一页"（Cmd/Ctrl+S、平台 Save All、关闭编辑器时触发）。
+	 */
+	public void saveDocument() {
+		saveTab(tabs == null ? boardTab : tabs.getSelectedInfo());
+	}
+
+	/** 保存指定页签对应视图的内容；null 视作 Board（页签尚未创建时）。 */
+	private void saveTab(@Nullable TabInfo tab) {
+		if (tab != null && tab == textTab) {
+			if (jsonPanel != null && jsonPanel.isModified()) {
+				jsonPanel.save();
+				setModified(false);
+			}
+			return;
+		}
+		saveBoard();
+	}
+
+	/**
+	 * 保存看板内容到文件。
 	 *
 	 * <p>2026-08-27：写入失败不再静默吞掉，改为 LOG + 气泡通知；
 	 * 成功后记录文件修改戳，供 dispose 外部修改检测使用。</p>
 	 */
-	public void saveDocument() {
+	private void saveBoard() {
 		if (file == null || dataView == null) {
 			return;
 		}
@@ -355,6 +413,9 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		}
 		if (saveAllHook != null) {
 			saveAllHook.dispose();
+		}
+		if (jsonPanel != null) {
+			jsonPanel.dispose();
 		}
 		editorPanel.removeAll();
 		if (dataView != null) {

@@ -33,11 +33,11 @@ public class DataChartEditorProvider implements FileEditorProvider, DumbAware {
 
 	@Override
 	public @NotNull FileEditorPolicy getPolicy() {
-		// 2026-09-24：Text Tab 交回平台默认文本编辑器，Board 用 PLACE_BEFORE_DEFAULT_EDITOR
-		// 稳定地排在它之前并默认激活（平台专门处理"自定义 editor 相对默认 editor 的位置"，
-		// 而多个自定义 provider 的 Tab 顺序在平台上没有保证）。
-		// Text Tab 的 JSON 高亮由 DataChartSyntaxHighlighterFactory 挂到 dataChart 语言上。
-		return FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR;
+		// 2026-09-24：Board / Text 改成同一个 FileEditor 内部的页签（JBTabs），
+		// 因此这里让本 provider 独占 IDE 层面的编辑器：隐藏平台自带的文本编辑器等，
+		// 避免 IDE 层再冒出一个多余的 tab。
+		// （平台不保证多个自定义 provider 之间的 Tab 顺序，见 DEVELOPMENT_GUIDE 第 50 节。）
+		return FileEditorPolicy.HIDE_OTHER_EDITORS;
 	}
 
 }

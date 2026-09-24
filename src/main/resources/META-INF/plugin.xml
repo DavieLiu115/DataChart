@@ -56,16 +56,18 @@
                 implementationClass="com.wd.editor.DataToolsFileType"
                 fieldName="INSTANCE_C"/>
 
-        <!-- 编辑器两个 Tab：
-             ① Board：图形看板（本插件 FileEditor）—— PLACE_BEFORE_DEFAULT_EDITOR 让它排在默认 Text Tab 之前且默认激活
-             ② Text：平台默认文本编辑器，JSON 高亮由下面给 dataChart 语言注册的高亮工厂提供 -->
+        <!-- 编辑器：单个 FileEditorProvider，编辑器内部用 JBTabs 提供 Board / Text 两个页签。
+             为什么顺序放内部做：平台不保证多个自定义 provider 的 Tab 顺序
+             （PLACE_BEFORE/AFTER_DEFAULT_EDITOR 没有平台代码处理、EP 的 order 属性实测也无效）。
+             Text 页用 JSON 类型的虚拟文件承载内容，因此高亮 / 格式化与真正的 .json 一致。
+             policy=HIDE_OTHER_EDITORS：隐藏平台自带的文本编辑器等，避免 IDE 层多出 tab -->
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
 
-        <!-- 让平台文本编辑器对 .datachart 显示出 JSON 语法高亮：
-             给自定义语言 dataChart 借用平台 JSON 的高亮实现。
-             ⚠️ 这里刻意不改 fileType 的 language —— 改语言会影响文件识别（曾经导致项目视图不显示 .datachart） -->
-        <lang.syntaxHighlighterFactory language="dataChart"
-                implementationClass="com.wd.editor.DataChartSyntaxHighlighterFactory"/>
+        <!-- 抑制平台自带的文本编辑器对 .datachart 生效：它按自定义语言 dataChart 渲染（无高亮），
+             且 Tab 名也叫 "Text"，会和我们编辑器内部的 JSON 高亮 Text 页混淆。
+             ⚠️ policy 里的 HIDE_DEFAULT_EDITOR / HIDE_OTHER_EDITORS 挡不住独立 EP 注册的
+             PsiAwareTextEditorProvider，只有 FileEditorProviderSuppressor（带 project/file 参数）能精准抑制 -->
+        <fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
 
         <internalFileTemplate name="DataChart"/>
 
@@ -76,13 +78,4 @@
                 bundle="messages.DataChartBoundle" key="DataChart.notification.group"/>
     </extensions>
 
-    <actions>
-        <!-- Text Tab 里手动格式化 JSON：自定义语言没有注册 formatter，
-             平台自带的 Reformat Code 对它无效，所以自带一个（复用保存时的重排逻辑） -->
-        <action id="DataChart.FormatJson" class="com.wd.editor.FormatJsonAction"
-                text="%DataChart.action.formatJson">
-            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt shift L"/>
-        </action>
-    </actions>
 </idea-plugin>
