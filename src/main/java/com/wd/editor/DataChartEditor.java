@@ -14,6 +14,7 @@ import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.ui.tabs.JBTabs;
 import com.intellij.ui.tabs.JBTabsFactory;
+import com.intellij.ui.tabs.JBTabsPosition;
 import com.intellij.ui.tabs.TabInfo;
 import com.intellij.ui.tabs.TabsListener;
 import com.wd.i18n.DataChartBundle;
@@ -107,6 +108,10 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 					// 没有任何平台代码处理、EP 的 order 属性实测也无效、provider 还是协程并发创建），
 					// 放到编辑器内部就能 100% 控制顺序与默认页。
 					tabs = JBTabsFactory.createTabs(project, this);
+					// 页签挪到编辑器区域底部（2026-09-24 用户要求）：
+					// 默认的 top 会紧贴 IDE 自己的编辑器 Tab 栏，两层 Tab 叠在一起容易被看错；
+					// JBTabs 只有 top / left / bottom / right 四种位置（常量就是小写）。
+					tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom);
 					boardTab = new TabInfo(dataView.getRootComponent())
 							.setText(DataChartBundle.message("DataChart.editor.tab.board"));
 					textTab = new TabInfo(jsonPanel.getComponent())

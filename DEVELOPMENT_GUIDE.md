@@ -1698,6 +1698,22 @@ provider 列表还走协程并发创建）。所以把 Board / Text 下沉为**�
 
 顺序与默认页 100% 由代码控制 ✅ —— 这正是前面几版做不到的。
 
+**页签位置**（2026-09-24 用户要求挪到下方）：
+
+```java
+tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom);
+```
+
+默认的 `top` 会让内部页签紧贴 IDE 自己的编辑器 Tab 栏，两层 Tab 上下叠在一起很容易看错
+（之前就把平台的纯文本 Tab 误当成了我们的 Text 页）。挪到底部后两者彻底分开。
+
+⚠️ 两个 API 细节：
+- `setTabsPosition(...)` 在 **`JBTabsPresentation`** 上，要 `tabs.getPresentation().setTabsPosition(...)`；
+  `JBTabs` 接口本身只有 `getPresentation()`，没有 `setSide`（旧文档里常见的 `setSide` 不是这个版本的接口）；
+- `JBTabsPosition` 的枚举常量是**小写**：`top / left / bottom / right`（不是 `TOP/BOTTOM`）；
+- 平台只有这四种位置，**没有"靠右"选项**（本版本已无 `TabLabelAlignment`），
+  底部时页签从左侧开始排列。
+
 **Text 页为什么高亮完美**（`DataChartJsonPanel`，即之前"两个 provider"那版的同一个做法）：
 内容放在 `new LightVirtualFile(name + ".json", JsonFileType.INSTANCE, text)` 里，
 编辑器的**文件就是 JSON 语言** → JSON 的全套机制生效：token 高亮 **+ PSI 层的

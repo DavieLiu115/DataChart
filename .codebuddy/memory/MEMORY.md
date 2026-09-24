@@ -103,6 +103,9 @@
   （`isSuppressed(Project, VirtualFile, FileEditorProvider)` 带文件参数，只对 .datachart 抑制 `instanceof TextEditorProvider`；
   ⚠️ 该 EP 全局注册，实现里必须自己按文件类型过滤）。否则 IDE 层会多一个纯文本 "Text" tab（按自定义语言 `dataChart` 渲染、无高亮），
   极易被误判成"我们的 Text 页没高亮"。`HIDE_DEFAULT_EDITOR` / `HIDE_OTHER_EDITORS` 都挡不住它。
+- **内部页签贴底部**（用户要求）：`tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom)`
+  —— 默认 top 会与 IDE 自己的 Tab 栏叠在一起。⚠️ `setTabsPosition` 在 `JBTabsPresentation` 上（不是 `JBTabs`）；
+  `JBTabsPosition` 枚举常量是**小写** `top/left/bottom/right`；平台只有四边、无"靠右"选项，底部时页签自左侧排列。
 - 页签名走 i18n：`DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.tab.text`（Text / 文本）。
 - 教训：`loading` 标志要在 `loadFromJson` **之后**解除，否则重建看板的回调会把刚打开的文件标记成已修改。
 - 详见 DEVELOPMENT_GUIDE 第 50 节「✅✅ 最终方案：编辑器内部页签」。
