@@ -216,6 +216,21 @@ public class KanbanBoard extends JPanel {
 			new Color(0xAAAAAA)); // 深色主题：浅灰，避免与暗背景对比不足
 
 	/**
+	 * 连线预览：<b>起点行</b>的高亮色（2026-09-24 新增）。
+	 *
+	 * <p>原来起点行直接铺 {@link #CONNECTION_PREVIEW_COLOR}（浅色主题 {@code #757575} 深灰）——
+	 * 那是画 2.4px 细线用的颜色，铺满整行后太黑，把行内的列名 / 注释 / 类型全压住了（用户反馈"太黑了"）。
+	 * 现在按用途拆开：<b>线</b>用深灰预览色（细线需要对比度），<b>行背景</b>用这组浅色。</p>
+	 *
+	 * <p>与目标行的 {@link #CONNECTION_TARGET_PREVIEW_COLOR}（淡绿）配套成"起点灰、落点绿"：
+	 * 浅色主题用浅灰蓝（垫得住 {@code #333} 文字，卡片底色是纯白），
+	 * 深色主题用略亮于卡片底（{@code #3C3F41}）的暗灰蓝，暗底上能看出但不会亮得刺眼。</p>
+	 */
+	private static final Color CONNECTION_SOURCE_PREVIEW_COLOR = new JBColor(
+			new Color(0xD5DDE6), // 浅色主题：浅灰蓝
+			new Color(0x4A5560)); // 深色主题：暗灰蓝
+
+	/**
 	 * 连线预览：目标行"落点"高亮色（2026-09-16）。
 	 *
 	 * <p>拖线悬停到哪一行，哪一行背景亮起浅绿色（深色主题用深绿），
@@ -535,9 +550,10 @@ public class KanbanBoard extends JPanel {
 					KanbanCard targetCard = findCardAt(e.getPoint());
 					previewHighlightRows.clear();
 					if (connectionSource != null) {
+						// 起点行铺浅灰蓝（不是预览线的深灰）—— 见 CONNECTION_SOURCE_PREVIEW_COLOR
 						previewHighlightRows
 								.computeIfAbsent(connectionSource, k -> new HashMap<>())
-								.put(connectionSourceRow, CONNECTION_PREVIEW_COLOR);
+								.put(connectionSourceRow, CONNECTION_SOURCE_PREVIEW_COLOR);
 					}
 					if (targetCard != null && targetCard != connectionSource) {
 						Point2D tp = viewport.transformPoint(e.getPoint());

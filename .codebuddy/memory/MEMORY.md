@@ -66,6 +66,10 @@
   按顺序循环分配，周期 6）：紫 `#E2D5FF`/`#4A3B6E`、蓝 `#D1E4FF`/`#2A4A75`、绿 `#D0F0D9`/`#2A5A3A`、
   橙 `#FFEBCC`/`#6E4A2A`、青 `#D6FAFF`/`#2A6E75`、粉 `#FBE2FF`/`#6E2A75`。
   用 `JBColor` 是因为主题开关没有传到 `Connection.draw(Graphics2D)`，这样连线色与卡片/画布共用同一次主题判定。
+- **拖线的行高亮色按用途拆开**（同一个色不能既当细线又当整行背景）：预览**线** `CONNECTION_PREVIEW_COLOR`
+  (`#757575`/`#AAAAAA`)、起点**行背景** `CONNECTION_SOURCE_PREVIEW_COLOR` (`#D5DDE6`/`#4A5560`，2026-09-24 新增，
+  原来误用预览线的深灰 → 用户反馈"太黑了")、目标**行背景** `CONNECTION_TARGET_PREVIEW_COLOR` (`#BFE8C5`/`#33553F`)。
+  选色基准：卡片底色 `KanbanCard.BG_LIGHT=#FFFFFF` / `BG_DARK=#3C3F41`。
   ⚠️ 同一组颜色**兼作"连线占用行"的行背景色**（`computeLinkedRows` → `Connection.getResolvedLineColor()`），
   所以必须保持**低饱和浅色**，不能换成高饱和线框色；颜色不写入 .datachart（加载时重新分配）。详见 34 节末尾。
 - **扩展名常量**：`DataToolsFileType.EXTENSION = "datachart"`，不要硬编码（9 节）。
