@@ -83,4 +83,7 @@
   否则内置 SaveAll 拿旧 Document 覆盖新内容；写盘期间用 `UndoUtil.disableUndoFor` 隔离撤销栈（`UndoConstants` 已弃用但无替代 → `@SuppressWarnings("deprecation")`）。
 - `EditorSaveAllHook`（`beforeAllDocumentsSaving`）解决"Text Tab 有未保存内容时内置 SaveAll 先消费 Cmd+S，画布改动不落盘"。
 - 教训：`loading` 标志必须在 `loadFromJson` **之后**解除，否则重建看板的变更回调会把刚打开的文件标记成已修改。
+- **JSON 格式化**：`ChartJsonUtil.toPrettyJson/prettifyText` 输出多行 JSON（2 空格缩进 + `"k": v` 冒号空格，与模板一致）；
+  `prettifyText` 必须带 `Feature.OrderedField`（fastjson 的 JSONObject 默认 HashMap，否则字段顺序乱 → 反复写盘）；
+  打开文件时自动把紧凑 JSON 重排（只改空白、幂等、Text 有未保存修改则跳过）。
 - 详见 DEVELOPMENT_GUIDE 第 50 节。

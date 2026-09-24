@@ -12,6 +12,7 @@ import com.wd.i18n.DataChartBundle;
 import com.wd.i18n.DataChartLanguage;
 import com.wd.icon.PluginIcons;
 import com.wd.model.ChartData;
+import com.wd.model.ChartJsonUtil;
 import com.alibaba.fastjson.JSON;
 import java.awt.BorderLayout;
 import java.awt.event.ComponentAdapter;
@@ -466,12 +467,17 @@ public class DataChartView extends DialogWrapper {
 	}
 
 	/**
-	 * 将当前看板状态序列化为 JSON 字符串（保存 .datachart 时使用）
+	 * 将当前看板状态序列化为 JSON 字符串（保存 .datachart 时使用）。
+	 *
+	 * <p>2026-09-24：改为输出<b>格式化 JSON</b>（多行 + 2 空格缩进）——
+	 * 编辑器有 Text Tab 后，紧凑单行既不便阅读也不利于 git diff。
+	 * {@code JSON.parseObject} 对空白不敏感，旧的紧凑文件仍可正常加载，
+	 * 保存一次（或打开时自动迁移，见 {@code DataChartEditor#prettifyFileIfNeeded}）即转为格式化版本。</p>
 	 */
 	public String serializeToJson() {
 		ChartData data = kanbanBoard.toChartData();
 		data.setAiGuide(aiGuide);
-		return JSON.toJSONString(data);
+		return ChartJsonUtil.toPrettyJson(data);
 	}
 
 	/**

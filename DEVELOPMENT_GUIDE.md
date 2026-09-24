@@ -1469,3 +1469,33 @@ Text Tab 背后有一份 `Document`。只写 VFS 不刷新它 → 用户按 Cmd/
   ① 打开 .datachart 默认落在图形 Tab；② 切到 Text 改 JSON 保存 → 切回图形看到新内容；
   ③ 图形里改布局按 Cmd+S → 切到 Text 看到同步后的 JSON；④ Cmd+Z 不应把内容倒回旧版本。
 
+#### 补充：Text Tab 的 JSON 格式化（2026-09-24）
+
+Text Tab 里是 .datachart 的原始 JSON，而 fastjson 默认 `JSON.toJSONString(data)` 输出**紧凑单行**，
+既难读也不利于 git diff。统一走新工具类 `com.wd.model.ChartJsonUtil`：
+
+| 方法 | 用途 |
+| --- | --- |
+| `toPrettyJson(Object)` | 模型 → 格式化 JSON（`DataChartView.serializeToJson` 保存时用） |
+| `prettifyText(String)` | JSON 文本 → 格式化文本（打开旧紧凑文件时迁移用，非法 JSON 返回 `null`） |
+
+三处后处理，缺一不可：
+
+1. **缩进**：fastjson 的 `PrettyFormat` 用 `\t`，折算成 **2 空格** ——
+   与新建文件模板 `fileTemplates/DataChart.datachart.ft` 一致。
+2. **冒号后空格**：fastjson 输出 `"k":v`，模板与 IDEA 的格式（Ctrl+Alt+L）都是 `"k": v`。
+   逐字符扫描、跳过字符串字面量（含转义）给键值分隔冒号补空格 ——
+   JSON 里不在字符串内的冒号只有这一种语义，所以安全（字符串值里的 `"a:b"` 不受影响）。
+   这一步不做的话，用户在 Text Tab 按 `Ctrl+Alt+L` 会与保存输出**互相打架**，格式来回抖。
+3. **⚠️ `Feature.OrderedField`**：`prettifyText` 里必须写
+   `JSON.parseObject(raw, Feature.OrderedField)`。fastjson 的 `JSONObject` **默认基于 HashMap**，
+   不带这个 Feature 会把字段顺序打乱 → 后果是每次打开文件「重排结果 ≠ 原文」→ 每次打开都写盘、
+   字段顺序来回跳。
+
+**打开时自动迁移**（`DataChartEditor.prettifyFileIfNeeded`）：加载完成后若磁盘内容是紧凑 JSON，
+就重排为多行写回，让 Text Tab 打开即是格式化版本。安全约束：
+- 只重排空白，不改字段顺序与取值（走 `prettifyText`，解析失败一律不动文件）；
+- `pretty.equals(raw)` 时跳过 → **幂等**，不会反复写盘（用 jshell 验证过 `IDEMPOTENT=true`）；
+- Text Tab 的 Document 有未保存修改时跳过（`FileDocumentManager.isDocumentUnsaved`），不覆盖用户输入；
+- 写盘同样走 `EditorFileSync.writeContent`（带 requestor，自触发事件被过滤）。
+
