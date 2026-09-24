@@ -36,7 +36,7 @@ DataChart 让你从 Database 工具窗口把数据库表直接拖到一块无限
 - **查找引用**：右键表头「查找引用」复用 IDEA 的 Find Usages（Alt+F7），在工程内的 SQL / XML 等文件中搜索该表名的引用，结果展示在 Find 工具窗口
 
 ### 工程化
-- **文件即数据**：`.datachart` 为可读 JSON，自带 `_aiGuide` 字段说明格式，方便人工或 AI 直接读取与修改
+- **文件即数据**：`.datachart` 为可读 JSON，自带 `aiGuide` 字段说明格式，方便人工或 AI 直接读取与修改
 - **主题适配**：所有颜色、图标均提供深色 / 浅色两套，跟随 IDE 主题自动切换
 - **后台化与稳定性**：拖表元信息查询、文件读写、导出渲染均走后台线程 + `ReadAction`，避免卡顿 EDT；编辑器 `dispose` 时完整清理定时器、监听器与拖拽目标
 
@@ -115,21 +115,21 @@ DataChart 让你从 Database 工具窗口把数据库表直接拖到一块无限
 
 ```jsonc
 {
-  "_aiGuide": "给 AI / 使用者的格式说明（新建文件时由模板写入）",
+  "aiGuide": "给 AI / 使用者的格式说明（新建文件时由模板写入）",
   "version": "1.0",
   "name": "看板名称",
   "tables": [
     {
-      "id": "UUID",                  // 卡片唯一 ID
+      "id": "UUID",                  // 卡片唯一 ID（早期文件是 datasource.schema.tableName）
       "datasource": "数据源",
       "schema": "public",
       "tableName": "sys_user",
       "comment": "用户表",
-      "x": 0, "y": 0,                // 画布坐标
-      "width": 280, "height": 200,   // 卡片尺寸
+      "x": 0, "y": 0,                // 画布坐标（打开时保留）
+      "width": 280, "height": 200,   // 卡片尺寸（打开时会被插件按内容重算）
       "columns": [
         { "name": "id", "type": "bigint", "comment": "主键",
-          "isPrimaryKey": true, "isNullable": false, "isIndexed": false }
+          "primaryKey": true, "nullable": false, "indexed": false }
       ],
       "highlightedRows": [0]         // 用户手动高亮的行索引
     }
@@ -138,7 +138,8 @@ DataChart 让你从 Database 工具窗口把数据库表直接拖到一块无限
     {
       "fromCardId": "卡片ID", "fromColumn": "0", "fromColumnName": "id",
       "relationType": "ONE_TO_MANY",
-      "toCardId": "卡片ID", "toColumn": "3", "toColumnName": "user_id"
+      "toCardId": "卡片ID", "toColumn": "3", "toColumnName": "user_id",
+      "colorIndex": 3                // 连线配色序号（调色板下标，可省略）
     }
   ]
 }
@@ -148,6 +149,8 @@ DataChart 让你从 Database 工具窗口把数据库表直接拖到一块无限
 
 1. **连线列以列名为准**：`fromColumn` / `toColumn` 存的是列 index，但解析与重定位时**优先使用 `fromColumnName` / `toColumnName`**。列 index 会因增删列而错位，列名不会。
 2. **卡片 ID 必须唯一**：虽然历史格式里 id 形如 `datasource.schema.tableName`，但同一张表可以被拖入多次，因此运行时一律分配 UUID；加载旧文件时检测到重复 id 会自动补齐 UUID。
+3. **连线配色随文件保存**：`relations[].colorIndex` 是调色板下标（0 起，浅色 / 深色主题各一套颜色）。删除某条连线时**不要顺移其它连线的 `colorIndex`**，否则重新打开颜色会变；省略该字段则由插件按顺序自动分配。
+4. **卡片尺寸由插件重算**：打开文件时 `width` 固定 280、`height` 按字段数计算（长注释不再截断，会溢出卡片边框），改这两个字段不生效 —— 调整排版请只改 `x` / `y`。
 
 ---
 

@@ -62,6 +62,11 @@ public final class BoardPersistence {
 					conn.getRelationType());
 			rel.setFromColumnName(resolveColumnName(conn.getSource(), conn.getSourceRow()));
 			rel.setToColumnName(resolveColumnName(conn.getTarget(), conn.getTargetRow()));
+			// 2026-09-24 保存配色序号：否则重新打开时按加载顺序重新分配颜色，
+			// 删掉靠前的连线后剩下的线颜色会整体前移（用户反馈"删了第一条再打开颜色变了"）
+			if (conn.getColorIndex() >= 0) {
+				rel.setColorIndex(conn.getColorIndex());
+			}
 			data.getRelations().add(rel);
 		}
 		return data;
@@ -87,7 +92,7 @@ public final class BoardPersistence {
 	 *
 	 * @param data         图数据模型
 	 * @param findCardById 按卡片 ID 查找卡片（返回 null 表示不存在）
-	 * @param addConnection 恢复一条连线（源/目标卡片，源/目标行，关系类型）
+	 * @param addConnection 恢复一条连线（源/目标卡片，源/目标行，关系类型，调色板序号）
 	 */
 	public static void loadFromChartData(ChartData data,
 			FindCard findCardById, AddConnection addConnection) {
@@ -112,7 +117,8 @@ public final class BoardPersistence {
 			if (type == null || type == RelationType.UNKNOWN) {
 				type = RelationType.ONE_TO_ONE;
 			}
-			addConnection.add(src, srcRow, tgt, tgtRow, type);
+			// 2026-09-24：把存档里的配色序号一起交给调用方，保住原来的颜色
+			addConnection.add(src, srcRow, tgt, tgtRow, type, rel.getColorIndex());
 		}
 	}
 
@@ -175,8 +181,14 @@ public final class BoardPersistence {
 
 	/** 添加一条连线 */
 	public interface AddConnection {
+		/**
+		 * 恢复一条连线。
+		 *
+		 * @param colorIndex 连线在调色板中的序号（2026-09-24 新增）；旧文件为 {@code null}，
+		 *                   此时由实现方按顺序分配（与旧行为一致）
+		 */
 		void add(KanbanCard source, int sourceRow,
-				KanbanCard target, int targetRow, RelationType type);
+				KanbanCard target, int targetRow, RelationType type, Integer colorIndex);
 	}
 
 	/**

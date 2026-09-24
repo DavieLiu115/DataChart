@@ -102,7 +102,8 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - 保存：`BoardPersistence.toChartData` 通过 `resolveColumnName` 从行 index 取列名一并写入
   - 加载：`loadFromChartData` 用 `resolveRowIndex` **优先按列名定位**真实 index，找不到（旧文件无列名）才回退旧 index → 向后兼容旧 .datachart
   - 新保存的文件即使之后增删列，只要列名还在，连线仍准确落在该列
-- **AI 使用说明 `_aiGuide`（2026-08-03）**：`.datachart` JSON 头部含 `_aiGuide` 字段，给 AI 读文件时的使用指引
+- **AI 使用说明 `aiGuide`（2026-08-03 引入，2026-09-24 键名统一/内容校正）**：`.datachart` JSON 头部含该字段，
+  给 AI 读文件时的使用指引（键名与模型字段名一致，详见第 52 节末尾）
   - `ChartData` 有 `aiGuide` 字段（声明在 `version` 前，序列化时靠前输出）
   - 新建文件由模板 `fileTemplates/DataChart.datachart.ft` 写入默认说明；fastjson 默认不序列化 null，旧文件无该字段不影响
   - **传递链**：`DataChartView` 加载时 `data.getAiGuide()` 暂存到 `DataChartView.aiGuide` 字段，保存时 `serializeToJson` 用 `data.setAiGuide(aiGuide)` 写回——避免因 `KanbanBoard.toChartData()` 重建 ChartData 而丢失
@@ -670,7 +671,8 @@ private static final Color[] CONNECTION_COLOR_PALETTE = {
   压暗后 YIQ 亮度从 222~240 降到 194~210，仍均 >128（属浅色）→ 当"连线占用行"的行背景照样垫得住正文。
   **只动浅色版，深色版保持用户给的原始值**（深色版本来就够暗）。
   ⚠️ 以后要再调亮度，也照这个办法整体换算（`round(v * k)`），别手工改单个通道 —— 会跑色相。
-- 颜色**不写入** `.datachart`（加载时按此表重新分配），所以改这一处，旧看板打开也会跟着变色。
+- 颜色**已随 `.datachart` 持久化**（2026-09-24 起，见第 52 节）：文件里存的是<b>调色板序号</b>，
+  加载时按序号还原。所以改这张表不会影响已保存文件里的连线颜色（序号越界时取模回绕）。
 - 循环周期 6：超过 6 条连线开始重复，需要更多就按"同色相浅+深"成对往数组里加。
 
 #### 拖线预览色 = 即将分配到的连线色（2026-09-24 定稿）
@@ -1934,4 +1936,72 @@ public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
 1. 卡片宽度仍是 280（不随内容变宽）；
 2. 注释整句显示、可越过卡片右边框，无 `...`；
 3. 右键「同步表结构」后同样没有省略号、宽度不变。
+
+---
+
+### 52. 连线颜色随 `.datachart` 持久化（2026-09-24）
+
+#### 现象
+用户：**"连完之后，删除了一开始的连线，关闭后再打开，后面的线条颜色会变"**。
+
+原因：颜色从来没存过 —— `BoardPersistence.loadFromChartData` 恢复连线时调用 `KanbanBoard.addConnection(...)`，
+由 `connectionColorIndex` **按读到的顺序**从调色板依次分配。
+于是"删掉第 1 条连线"会让第 2 条在文件里的位置前移，重新打开时它拿到的是原来的第 1 个颜色。
+
+#### 方案：把"调色板序号"写进 `ChartRelation`
+
+| 层 | 改动 |
+| --- | --- |
+| `ChartRelation` | 新增 `Integer colorIndex`（+ getter/setter），随 `.datachart` JSON 自动序列化 |
+| `Connection` | 新增 `int colorIndex = -1`（+ getter/setter），建线时记下用的是哪个序号 |
+| `BoardPersistence.toChartData` | `if (conn.getColorIndex() >= 0) rel.setColorIndex(...)` |
+| `BoardPersistence.AddConnection` | 回调签名加 `Integer colorIndex`（旧文件为 `null`） |
+| `BoardPersistence.loadFromChartData` | 把 `rel.getColorIndex()` 一起传给回调 |
+| `KanbanBoard.addConnection(...)` | 拆成"公开版（按游标取下一个色）"+"私有版（指定序号）" |
+| `KanbanBoard.restoreConnection(...)` | 新回调实现：有序号就按序号还原；没有则走老路径顺序分配 |
+
+生成的 JSON 片段：
+
+```json
+"relations": [
+  { "colorIndex": 3, "fromCardId": "…", "fromColumnName": "id", "toColumnName": "user_id", "relationType": "ONE_TO_ONE" }
+]
+```
+
+#### 三个关键决策
+1. **存序号，不存 RGB**：调色板是 `JBColor`（浅色 / 深色两版）。存序号才能让同一份文件在两种主题下各取所需；
+   存死 RGB 会让老连线在深色主题下不变色 —— 压在暗底上刺眼、当行背景还会糊住文字。
+2. **只写进项目文件，不碰任何 IDE 设置**：明确按用户要求，全部落在 `.datachart` 里（不用 `PropertiesComponent`）。
+3. **加载后推进分配游标**：`restoreConnection` 里 `connectionColorIndex = max(cursor, idx + 1)`，
+   否则新加的连线会立刻撞上刚恢复的最后一个颜色。旧文件（全 `null`）走的还是老路径，行为不变。
+
+#### 兼容性
+- 旧文件没有 `colorIndex` → 反序列化为 `null` → 顺序分配，**打开、显示、保存都不会报错**；
+- 用户保存一次后文件里就带上序号，此后颜色固定；
+- 调色板长度变化时序号按 `floorMod` 取模回绕（不会数组越界）；
+- 已用 jshell 实测：`toJSONString` 写出 `"colorIndex":3`、`parseObject` 读回 3、缺字段读回 `null`。
+
+#### 验证（`runIde`）
+1. 建 3 条连线（紫 / 蓝 / 绿）→ 删掉第 1 条 → 保存 → 关闭再打开：剩下两条仍是蓝 / 绿（原来会变成紫 / 蓝）；
+2. 打开一个旧 `.datachart`（没有 `colorIndex`）→ 显示正常、不报错，保存一次后文件里出现 `colorIndex`；
+3. 恢复文件后继续新建连线 → 新线颜色不会撞上刚恢复的最后一条（游标已推进）。
+
+#### 附：新文件的 `aiGuide` 同步校正（2026-09-24）
+
+`.datachart` 头部那段给 AI 看的说明来自模板 `fileTemplates/DataChart.datachart.ft`（只在**新建文件**时写入，
+已存在的文件不会被改写）。这次一并校正了 4 处与代码不符/缺失的地方：
+
+| 问题 | 修正 |
+| --- | --- |
+| `relations` 没提配色 | 补 `colorIndex`（0 起调色板下标，可省略） |
+| `columns` 的布尔字段写成 `isPrimaryKey / isNullable / isIndexed` | **实际存的是 `primaryKey / nullable / indexed`** —— fastjson 用 getter 推导属性名，会把 `isXxx()` 的 `is` 前缀去掉（模型里方法仍叫 `isPrimaryKey()`）。**照旧说明写 `isPrimaryKey` 的 AI 会改不生效** |
+| 卡片 id 说成 `datasource.schema.tableName` | 改为"当前是 UUID；早期文件可能是 `datasource.schema.tableName`"（2026-08-07 起运行时一律分配 UUID） |
+| `width / height` 被当成有效字段 | 补一句"打开文件时会被插件重算（宽 280、高按字段数），改它不生效，排版请改 `x` / `y`" |
+
+**键名统一**：模板里原来是 `_aiGuide`，但保存时 fastjson 写的是模型字段名 `aiGuide` ——
+同一个文件"新建时一个键、保存一次后换键"。现在模板统一用 `aiGuide`；
+fastjson 的 smartMatch 会忽略下划线，所以**旧文件的 `_aiGuide` 依然能读入**（已实测）。
+
+> 教训：给 AI 看的"格式说明"必须**照着真实序列化结果写**，不能照着模型源码的字段名写 ——
+> `isXxx` 这类布尔字段被 fastjson 改名就是典型；写完用 jshell `JSON.toJSONString(实例)` 打印一次最保险。
 

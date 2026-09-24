@@ -16,8 +16,13 @@ public class ChartData {
 	/**
 	 * 给 AI 的文件使用说明（JSON 中位于最前）。
 	 *
-	 * <p>新建 .datachart 文件时由模板写入，随保存持久化；解析时 fastjson 按字段读取。
+	 * <p>新建 .datachart 文件时由模板 {@code fileTemplates/DataChart.datachart.ft} 写入，随保存持久化；
 	 * 仅作为给 AI 的使用指引，业务逻辑不依赖该字段。</p>
+	 *
+	 * <p>2026-09-24：模板里的键名由 {@code _aiGuide} 统一为 {@code aiGuide} ——
+	 * 因为保存时 fastjson 用的是模型字段名（{@code aiGuide}），
+	 * 原来"新建文件叫 _aiGuide、保存一次后变成 aiGuide"会造成同一个文件两种键名。
+	 * fastjson 的 smartMatch 会忽略下划线，所以<b>旧文件的 {@code _aiGuide} 仍然能正常读入</b>。</p>
 	 */
 	private String aiGuide;
 

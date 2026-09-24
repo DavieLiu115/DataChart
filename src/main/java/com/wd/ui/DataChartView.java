@@ -75,7 +75,8 @@ public class DataChartView extends DialogWrapper {
 	private String baseFileName = "datachart";
 
 	/**
-	 * 给 AI 的文件使用说明（来自 .datachart JSON 的 _aiGuide 字段）。
+	 * 给 AI 的文件使用说明（来自 .datachart JSON 的 {@code aiGuide} 字段；
+	 * 旧文件里的 {@code _aiGuide} 也能读入，见 {@link ChartData#getAiGuide()}）。
 	 *
 	 * <p>加载时从 JSON 读取暂存，保存时写回，避免随 {@link KanbanBoard#toChartData()}
 	 * 重建 {@link ChartData} 而丢失。新建文件时由模板提供默认说明。</p>

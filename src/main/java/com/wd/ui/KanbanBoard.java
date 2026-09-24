@@ -192,7 +192,10 @@ public class KanbanBoard extends JPanel {
 	 * 线是什么颜色，它两端落点的行背景就是什么颜色），所以浅色版必须低饱和（垫得住正文），
 	 * 深色版也别太亮（在暗卡片上不能比文字还抢眼）。</p>
 	 *
-	 * <p>颜色不写进 .datachart（加载时按此表重新分配），所以改这里旧看板也会跟着变色。
+	 * <p>2026-09-24 起<b>颜色（调色板序号）会随 .datachart 保存</b>（见 {@code ChartRelation#colorIndex}）：
+	 * 重新打开文件时按存档序号还原，不再"按加载顺序重新分配" ——
+	 * 否则删掉靠前的连线后，剩下的线颜色会整体前移。
+	 * 因此改这张表<b>不会</b>影响已保存文件里那些线（它们仍按存档序号取色；序号越界时才取模回绕）。
 	 * 用 {@code JBColor} 而不是写死两个数组：绘制与导出的深色判定都取自当前主题
 	 * （{@code BoardExportUtil.isDarkTheme(background)} 读的就是 JBColor 解析后的背景亮度），
 	 * 所以连线颜色跟着主题自动切换，和卡片/画布保持同一次判定。</p>
@@ -1647,10 +1650,22 @@ public class KanbanBoard extends JPanel {
 	}
 
 	/**
-	 * 添加连线（指定关系类型）。
+	 * 添加连线（指定关系类型）：从调色板按顺序取下一个颜色。
 	 */
 	public Connection addConnection(KanbanCard source, int sourceRow,
 			KanbanCard target, int targetRow, RelationType relationType) {
+		int nextIndex = connectionColorIndex % CONNECTION_COLOR_PALETTE.length;
+		connectionColorIndex++;
+		return addConnection(source, sourceRow, target, targetRow, relationType, nextIndex);
+	}
+
+	/**
+	 * 添加连线并指定调色板序号（该序号会随 .datachart 一起保存）。
+	 *
+	 * @param colorIndex 调色板下标（内部按调色板长度取模，越界也安全）
+	 */
+	private Connection addConnection(KanbanCard source, int sourceRow,
+			KanbanCard target, int targetRow, RelationType relationType, int colorIndex) {
 		if (source == null || target == null
 				|| source == target || sourceRow < 0 || targetRow < 0) {
 			return null;
@@ -1661,15 +1676,36 @@ public class KanbanBoard extends JPanel {
 				return null;
 			}
 		}
-		Color color = CONNECTION_COLOR_PALETTE[connectionColorIndex
-				% CONNECTION_COLOR_PALETTE.length];
-		connectionColorIndex++;
+		int idx = Math.floorMod(colorIndex, CONNECTION_COLOR_PALETTE.length);
+		Color color = CONNECTION_COLOR_PALETTE[idx];
 		Connection conn = new Connection(source, sourceRow, target, targetRow, color, relationType);
+		// 记下序号 —— 保存时写进 ChartRelation.colorIndex，重新打开颜色才不会变
+		conn.setColorIndex(idx);
 		connections.add(conn);
 		linkedRowsCache = null; // 连线结构变化，失效占用行缓存
 		repaint();
 		notifyBoardChanged();
 		return conn;
+	}
+
+	/**
+	 * 从存档恢复一条连线（{@link BoardPersistence.AddConnection} 的实现）。
+	 *
+	 * <p>2026-09-24：存档里记了调色板序号就按它还原 —— 否则颜色是"按加载顺序重新分配"的，
+	 * 用户删掉靠前的连线再打开，后面所有连线的序号整体前移 → 颜色全变（用户反馈的正是这个）。
+	 * 旧文件没有序号（{@code null}）→ 继续按顺序分配，行为与以前完全一致。</p>
+	 */
+	private void restoreConnection(KanbanCard source, int sourceRow,
+			KanbanCard target, int targetRow, RelationType relationType, Integer colorIndex) {
+		if (colorIndex == null || colorIndex < 0) {
+			addConnection(source, sourceRow, target, targetRow, relationType);
+			return;
+		}
+		Connection conn = addConnection(source, sourceRow, target, targetRow, relationType, colorIndex);
+		if (conn != null) {
+			// 把分配游标推到已用序号之后，避免随后新建的连线立刻撞到同一个颜色
+			connectionColorIndex = Math.max(connectionColorIndex, conn.getColorIndex() + 1);
+		}
 	}
 
 	/**
@@ -2044,7 +2080,7 @@ public class KanbanBoard extends JPanel {
 		linkedRowsCache = null;
 		connectionColorIndex = 0;
 		BoardPersistence.loadFromChartData(data,
-				this::findCardById, this::addConnection);
+				this::findCardById, this::restoreConnection);
 
 		selectedCard = null;
 		selectedCards.clear();

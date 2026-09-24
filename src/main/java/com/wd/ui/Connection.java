@@ -35,6 +35,14 @@ public class Connection {
 	private Color color;
 	private float strokeWidth = DEFAULT_STROKE_WIDTH;
 
+	/**
+	 * 该连线在调色板中的序号（{@code -1} = 不是调色板分配的色）。
+	 *
+	 * <p>2026-09-24 新增，仅用于持久化：保存时写进 {@code ChartRelation.colorIndex}，
+	 * 让重新打开文件后颜色保持不变（详见 {@link com.wd.model.ChartRelation#getColorIndex()}）。</p>
+	 */
+	private int colorIndex = -1;
+
 	/** 关系类型：决定起点/终点的形状（鸟爪/分叉等）；新建连线默认一对一 */
 	private RelationType relationType = RelationType.ONE_TO_ONE;
 
@@ -88,6 +96,15 @@ public class Connection {
 
 	public void setColor(Color color) {
 		this.color = color;
+	}
+
+	/** 调色板序号（{@code -1} 表示非调色板色）；仅供持久化使用。 */
+	public int getColorIndex() {
+		return colorIndex;
+	}
+
+	public void setColorIndex(int colorIndex) {
+		this.colorIndex = colorIndex;
 	}
 
 	public float getStrokeWidth() {

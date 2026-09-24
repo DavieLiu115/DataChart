@@ -62,6 +62,10 @@
   详见 DEVELOPMENT_GUIDE 第 51 节（22 节仅"截断"部分被修订，固定宽度仍有效）。
 - **位置保留用户拖动结果**：加载时保留 `model.x/y` 只修正尺寸；新建卡片从 (0,0) 平铺，4 张/行（26 节）。
 - **默认关系类型**：`RelationType.ONE_TO_ONE` 作默认，旧文件 UNKNOWN 也回退（29 节）。
+- **连线颜色随 `.datachart` 持久化**（2026-09-24）：`ChartRelation.colorIndex` 存**调色板序号**（存序号不存 RGB ——
+  palette 是 JBColor 双版本，存 RGB 会在深色主题下不变色）；`Connection.colorIndex` 建线时记录；
+  加载走 `KanbanBoard.restoreConnection`（有序号按序号还原，旧文件 null 则顺序分配并把游标推进到 max+1）。
+  只为修"删掉靠前的连线→重开→后面颜色全变"。**不写任何 IDE 设置**（用户明确要求只落在文件里）。详见 52 节。
 - **连线配色**（`KanbanBoard.CONNECTION_COLOR_PALETTE`，2026-09-24 用户指定的 light/dark 两套色，用 `JBColor` 一个元素挂两版，
   按顺序循环分配，周期 6）：浅色版**已整体压暗 12.5%**（各通道 ×0.875，保持色相）—— 紫 `#C6BADF`、蓝 `#B7C8DF`、
   绿 `#B6D2BE`、橙 `#DFCEB2`、青 `#BBDBDF`、粉 `#DCC6DF`；深色版用原始值 —— 紫 `#4A3B6E`、蓝 `#2A4A75`、
@@ -74,8 +78,14 @@
   `CONNECTION_TARGET_PREVIEW_COLOR`(`#BFE8C5`/`#33553F`) **有意保留**（`@SuppressWarnings("unused")`），要回老行为就换回去。
   老规律仍成立：同一个色值不能既当"细线"又当"整行背景"。详见 34 节末尾。
   ⚠️ 同一组颜色**兼作"连线占用行"的行背景色**（`computeLinkedRows` → `Connection.getResolvedLineColor()`），
-  所以必须保持**低饱和浅色**，不能换成高饱和线框色；颜色不写入 .datachart（加载时重新分配）。详见 34 节末尾。
+  所以必须保持**低饱和浅色**，不能换成高饱和线框色。颜色**已随 .datachart 持久化**（`ChartRelation.colorIndex`，
+  存调色板序号，见 52 节）。详见 34 节末尾。
 - **扩展名常量**：`DataToolsFileType.EXTENSION = "datachart"`，不要硬编码（9 节）。
+- **`.datachart` 的 `aiGuide` 与 JSON 字段名**（2026-09-24 校正）：给 AI 的说明存在 `aiGuide`（模板
+  `fileTemplates/DataChart.datachart.ft` 在新建文件时写入；旧文件的 `_aiGuide` 靠 fastjson smartMatch 仍可读入）。
+  ⚠️ **fastjson 用 getter 推导属性名**：`ColumnInfo.isPrimaryKey()/isNullable()/isIndexed()` 实际序列化成
+  `primaryKey` / `nullable` / `indexed`（不是 `isXxx`）。给 AI 的格式说明必须照**真实序列化结果**写 ——
+  写完用 jshell `JSON.toJSONString(实例)` 打印一次核对，别照模型源码字段名写。
 
 ### 7~9 布局与尺寸（共同教训：同步/ 零值）
 - **视口状态不在 JSON 中持久化**：每次打开都重置 viewport，靠 `focusView` 居中；IDE 重启自动重开时 `getComponent` 同步链路触发 `loadFromJson`，panel 尚未完成布局（37 节）。
