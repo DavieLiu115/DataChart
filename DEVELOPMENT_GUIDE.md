@@ -278,7 +278,7 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
 - **通知**：成功后用 `Notifications.Bus.notify(Notification("DataChart", ...))` 弹系统通知，失败给 Error 通知
 - **空画板**：cards.isEmpty() 时直接给 "画板为空，无内容可导出" 通知，不弹文件框
 - **iText 字体映射器**：`DefaultFontMapper` 的 `awtToPdf` 自定义返回 `BaseFont`（中文 STSong → simsun → 默认）
-- **画板坐标变换**：`paintForExport` 中 `g2.translate(-minX, -minY)` + `g2.scale(s, s)`，transform 链 = `scale ∘ translate`，最终 `T(P) = (P - (minX, minY)) * s`
+- **画板坐标变换**：`paintForExport` 中先 `g2.scale(s, s)` 再 `g2.translate(-minX, -minY)`，Transform 链在 Graphics2D 中后乘为 `scale ∘ translate`，最终映射为 `T(P) = (P - (minX, minY)) * scale`
 - **导出背景色**：2026-08-01 修复"两种背景色"问题。原 `backgroundColor = Gray._240 (#F0F0F0)` 与卡片 `BG_LIGHT (#FFFFFF)` 不一致。导出时硬编码用 `KanbanCard.getCardBackgroundColor(dark)`（与卡片同色），让画板 = 卡片，导出图只有一个背景色。IDE 内画板仍保持 `Gray._240`，不影响交互体验
 - **依赖**（`build.gradle.kts` 已配）：`com.itextpdf:itextpdf:5.5.13` + `com.itextpdf:itext-asian:5.2.0` + `com.twelvemonkeys.imageio:*:3.10.1`
 - **设计原则**：
@@ -287,10 +287,13 @@ IntelliJ IDEA 插件项目，支持自定义 `.datachart` 文件类型的图形�
   - 后缀兼容：用户没写 .pdf / .jpg 时自动补，避免保存成无后缀文件
   - **导出行为 vs IDE 行为分叉**：导出时的视觉策略（背景色、字体等）可以与 IDE 内不同，硬编码导出相关参数比修改全局字段更安全
 
-#### 导出图片已知问题修复（2026-08-01）
-- **清晰度问题**：原默认 scale=1.0 导出 11pt 字体渲染到 11px 像素，字小且模糊
-  - **修复**：默认 scale 改为 2.0（2x 高 DPI），字号 / stroke 自动放大；`KEY_FRACTIONALMETRICS_ON` 启用子像素精度
-  - `paintForExport` 增加 `scale` 参数：先 `translate(-minX, -minY)` 再 `scale(s, s)`，transform 链 = `scale ∘ translate`，最终 `T(P) = (P - (minX, minY)) * s`
+#### 导出图片表格/网格不全问题修复（2026-09-24）
+- **坐标变换顺序导致表格截断与巨大留白**：
+  - **根因**：Java Graphics2D 变换为后乘矩阵。原 `paintForExport` 先调用 `translate(-minX, -minY)` 再调用 `scale(s, s)`，导致坐标映射变为 `P_device = s * P_user - (minX, minY)`。在 scale=2.0 时，绘制起点从 $(s-1) \cdot minX$ 开始，造成图片左/上巨大留白，右/下表格被直接截断在图片边界外。
+  - **修复**：调整为先 `g2d.scale(s, s)` 再 `g2d.translate(-minX, -minY)`，使得 `P_device = s * (P_user - (minX, minY))`，表格精确且完整地填满 $[0, targetW] \times [0, targetH]$ 设备图像。
+- **屏幕视口缩放拦截导出网格线**：
+  - **根因**：`drawGrid` 中的 `if (viewport.getZoomFactor() < 0.3) return;` 没有区分屏幕视口与导出模式，用户在 IDE 中缩小画布到 30% 以下时，导出图片的网格线会被跳过不画。
+  - **修复**：加上 `rangeOverride == null` 条件，仅在屏幕视口渲染时拦截小缩放网格，导出模式（`rangeOverride != null`）始终完整绘制导出区域的所有网格线。
 - **黑色背景问题**（填 rect 起点错误）：
   - **根因**：g2d transform 链 = `scale ∘ translate(-minX, -minY)`，所以 `T((0, 0)) = (-minX*s, -minY*s)` 落在 BufferedImage 外，`fillRect(0, 0, w, h)` 不会覆盖完整 BufferedImage
   - **修复**：`fillRect((int) minX, (int) minY, w, h)` 用 exportArea 起点（=卡片合并 - 40 padding）作为用户坐标起点，transform 后正好落在设备 (0, 0)

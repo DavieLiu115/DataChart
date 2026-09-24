@@ -1236,11 +1236,13 @@ public class KanbanBoard extends JPanel {
 		g2d.setBackground(KanbanCard.getCardBackgroundColor(dark));
 		g2d.clearRect(0, 0, deviceW, deviceH);
 
-		// 2. 应用 transform：先 translate 使 exportArea 起点 (minX, minY) 到 (0, 0)，再 scale
-		g2d.translate(-minX, -minY);
+		// 2. 应用 transform：将 exportArea 起点 (minX, minY) 映射到 (0, 0) 并按 scale 缩放
+		// 在 Graphics2D 中，变换为后乘矩阵：必须先 scale 再 translate(-minX, -minY)
+		// 才能保证 P_device = scale * (P_user - (minX, minY))，避免 scale != 1.0 时图片四周空留白与内容切断
 		if (scale != 1.0) {
 			g2d.scale(scale, scale);
 		}
+		g2d.translate(-minX, -minY);
 
 		// 3. 绘制网格（导出时只在 exportArea 范围内画）
 		if (showGrid) {
@@ -1445,9 +1447,11 @@ public class KanbanBoard extends JPanel {
 		g2d.setColor(gridColor);
 		g2d.setStroke(new BasicStroke(0.5f));
 
-		Rectangle bounds = getBounds();
-		if (bounds == null || bounds.width <= 0 || bounds.height <= 0) {
-			return;
+		if (rangeOverride == null) {
+			Rectangle bounds = getBounds();
+			if (bounds == null || bounds.width <= 0 || bounds.height <= 0) {
+				return;
+			}
 		}
 
 		try {
@@ -1462,6 +1466,7 @@ public class KanbanBoard extends JPanel {
 				minY = rangeOverride.getY();
 				maxY = rangeOverride.getY() + rangeOverride.getHeight();
 			} else {
+				Rectangle bounds = getBounds();
 				// 屏幕模式：用 JPanel 屏幕范围，逆变换到画板坐标
 				AffineTransform inverse = viewport.getInverse();
 				Point2D p1 = new Point2D.Double();
@@ -1479,8 +1484,8 @@ public class KanbanBoard extends JPanel {
 			int endX = (int) (Math.ceil(maxX / gridSize) * gridSize);
 			int endY = (int) (Math.ceil(maxY / gridSize) * gridSize);
 
-			// 缩放过小时不绘制网格（性能考虑）
-			if (viewport.getZoomFactor() < 0.3) {
+			// 屏幕模式下，缩放过小时不绘制网格（性能考虑）；导出模式下（rangeOverride != null）不受屏幕视口缩放影响，必须绘制网格
+			if (rangeOverride == null && viewport.getZoomFactor() < 0.3) {
 				return;
 			}
 
