@@ -72,9 +72,21 @@
 
 每行的图标也是遵循了 `idea` 的规则
 
+还可以再拖一张表进来，看到辅助线了么？支持自动对齐，有轻微的磁吸效果。
 
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924161152886.png" alt="image-20260924161152886" style="zoom:50%;" />
 
+### 连线
 
+可以把表连起来
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924161322847.png" alt="image-20260924161322847" style="zoom:50%;" />
+
+可以设置对应关系
+
+<img src="/Users/lww/Library/Application Support/typora-user-images/image-20260924161419304.png" alt="image-20260924161419304" style="zoom:50%;" />
+
+我们多连几张
 
 
 

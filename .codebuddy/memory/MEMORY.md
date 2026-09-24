@@ -57,7 +57,9 @@
 - **卡片宽度固定 280；长注释不截断、直接溢出卡片（2026-09-24 定稿，用户明确要求）**：
   用户原话"不省略、**超出表格宽度也没问题**"+"**不用加表宽度**" → 文字可以出框，卡片不加宽。
   `KanbanCard.drawTableCard` 三处注释绘制不再调 `truncateByWidth`（并去掉 `maxCommentW > 10` 才画的门槛）。
-  `computeRequiredWidth` / `forTableAutoWidth` / `truncateByWidth` **有意保留但当前无人调用**（带"未启用"注释，别删）——
+  ⚠️ **导出范围必须用 `KanbanCard.getContentRequiredWidth()`**（`BoardExportUtil.calculateTotalBounds`）：
+  注释溢出卡片后，若只按 `bounds` 算范围，最右侧卡片溢出的文字会被导出图片边界切掉（用户反馈过"右边不完整"）。
+  `computeRequiredWidth` / `forTableAutoWidth` / `truncateByWidth` **有意保留，除导出场景外当前无人调用**（带"未启用"注释，别删）——
   将来要恢复自适应宽度，把 `KanbanBoard.addTableCard` / `loadFromChartData` / `KanbanCard.setTableInfoWithDiff` 三处宽度换回 `computeRequiredWidth(...)` 即可。
   详见 DEVELOPMENT_GUIDE 第 51 节（22 节仅"截断"部分被修订，固定宽度仍有效）。
 - **位置保留用户拖动结果**：加载时保留 `model.x/y` 只修正尺寸；新建卡片从 (0,0) 平铺，4 张/行（26 节）。

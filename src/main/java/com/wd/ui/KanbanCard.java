@@ -277,6 +277,34 @@ public class KanbanCard {
 	}
 
 	/**
+	 * 卡片<b>实际绘制</b>需要的宽度（含会溢出到卡片外的注释文字）。
+	 *
+	 * <p>2026-09-24 新增：注释不再按宽度截断后会画到卡片右边框之外，而 {@code bounds} 只有 280 宽。
+	 * 导出（图片 / PDF）的范围若只按 {@code bounds} 算，最右侧卡片溢出的那段文字就会被图片边界切掉
+	 * —— 用户反馈"导出的图片右边不完整"。</p>
+	 *
+	 * <p>⚠️ 多留 {@value #OVERFLOW_SLACK}px 余量：导出绘制开了
+	 * {@code FRACTIONALMETRICS_ON / TEXT_ANTIALIAS_ON}，实测字宽比离屏度量略大，不留余量仍可能被切掉。</p>
+	 *
+	 * @return {@code max(bounds.width, 内容所需宽度 + 余量)}
+	 */
+	public double getContentRequiredWidth() {
+		double boundsWidth = bounds.getWidth();
+		if (tableInfo == null) {
+			return boundsWidth;
+		}
+		// 结构同步时还会额外画"已删除列"，它们也要参与溢出测算
+		int required = computeRequiredWidth(tableInfo, deletedColumns);
+		if (required <= boundsWidth) {
+			return boundsWidth;
+		}
+		return required + OVERFLOW_SLACK;
+	}
+
+	/** 字体度量与实际渲染的宽度差余量（px），仅用于 {@link #getContentRequiredWidth()}。 */
+	private static final int OVERFLOW_SLACK = 12;
+
+	/**
 	 * 构造方法（表格模式，自动按列内容计算最优宽度）
 	 *
 	 * <p>宽度 = max(实际列内容所需宽度, {@link #MIN_TABLE_CARD_WIDTH})。

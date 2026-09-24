@@ -65,8 +65,13 @@ public final class BoardExportUtil {
 			if (b.getY() < minY) {
 				minY = b.getY();
 			}
-			if (b.getX() + b.getWidth() > maxX) {
-				maxX = b.getX() + b.getWidth();
+			// 2026-09-24：用"实际绘制宽度"而不是 bounds.width ——
+			// 注释不截断后会溢出卡片右侧（见 KanbanCard.getContentRequiredWidth），
+			// 只按 bounds 算范围的话，最右卡片溢出的文字会被导出图片的边界切掉
+			// （用户反馈"导出的图片右边不完整"）
+			double right = b.getX() + card.getContentRequiredWidth();
+			if (right > maxX) {
+				maxX = right;
 			}
 			if (b.getY() + b.getHeight() > maxY) {
 				maxY = b.getY() + b.getHeight();

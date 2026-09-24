@@ -1937,6 +1937,29 @@ public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
 2. 注释整句显示、可越过卡片右边框，无 `...`；
 3. 右键「同步表结构」后同样没有省略号、宽度不变。
 
+#### 副作用 2 与修正：导出图片右边被切（2026-09-24）
+
+注释既然会画到卡片外面，导出范围就必须把它算进去 —— 而 `BoardExportUtil.calculateTotalBounds`
+原来只按 `bounds` 算，于是**最右侧卡片溢出的那段文字落到图片边界外被切掉**
+（用户："导出的图片右边不完整"）。
+
+修法：`KanbanCard` 新增 `getContentRequiredWidth()`，导出范围改用它：
+
+```java
+// BoardExportUtil.calculateTotalBounds
+double right = b.getX() + card.getContentRequiredWidth();   // 原来：b.getX() + b.getWidth()
+```
+
+- `getContentRequiredWidth()` = `max(bounds.width, computeRequiredWidth(tableInfo, deletedColumns) + 12)`
+  —— 复用之前留下的度量实现（含结构同步中的"已删除列"），
+  加 12px 余量是因为导出绘制开了 `FRACTIONALMETRICS_ON / TEXT_ANTIALIAS_ON`，
+  实际字宽比离屏 `FontMetrics` 略大，不留余量还会被切一两个像素；
+- 图片（JPG / PNG）与 PDF 两条导出路径都走 `calculateTotalBounds` → 一处改好两处生效；
+- **顺带确认没有别的裁剪来源**：`paintForExport` 给 `drawCards` 传的是 `null`（不裁剪），
+  图片尺寸 = `exportArea × scale`，所以溢出的文字是唯一的越界内容；
+- 代价：某张卡有超长注释时，导出图会整体变宽、右侧留白变多 —— 这是"注释允许溢出"的必然结果，
+  介意就只能回到"截断"或"加宽卡片"（两条都被否过）。
+
 ---
 
 ### 52. 连线颜色随 `.datachart` 持久化（2026-09-24）
