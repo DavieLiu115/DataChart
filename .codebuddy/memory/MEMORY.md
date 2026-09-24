@@ -4,8 +4,9 @@
 
 ## 核心架构
 - IntelliJ IDEA 插件，自定义 `.datachart` 文件类型（`com.wd.editor.*`）
-- 编辑器是**双 Tab**：图形 "Board"（默认激活）+ IDEA 默认 "Text"（原始 JSON），
-  靠 `FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR` + `EditorFileSync` / `EditorSaveAllHook`，见第 11 条
+- 编辑器是**双 Tab**（都由插件提供）：图形 "Board"（默认激活）+ 自研 JSON 高亮 "Text"（原始 JSON）；
+  `DataChartEditorProvider`(HIDE_DEFAULT_EDITOR) + `DataChartTextEditorProvider`(NONE)，
+  靠 `EditorFileSync` / `EditorSaveAllHook` 跨 Tab 同步，见第 11 条
 - 画板核心：`KanbanBoard`（编排层）+ 工具类（`BoardPersistence` / `BoardExportUtil` / `BoardContextMenu` / `BoardSnapHelper` / `BoardSearchModel` / `BoardViewport` / `NotificationUtil`）
 - 数据模型：`com.wd.model`（ChartData / TableCardModel / ChartRelation / RelationType）
 - DB 元信息反射：`com.wd.db.DatabaseTableMetadataFetcher`（全反射访问 `com.intellij.database.*`）
@@ -75,9 +76,15 @@
 - **菜单 hover 整行变粉（macOS 强调色）→ 必须完全自绘**：IntelliJ 的 `BegMenuItemUI`/`IdeaMenuUI` 在 `installDefaults()` 用 `JBColor.namedColor(...)` 覆盖 `selectionBackground` 且**全局缓存**，`UIManager.put` 与 client property 全部无效，`IdeaMenuUI.fillBackground()` 的 hover 填充也不受 `isOpaque()` 控制。**唯一可靠解**：`BoardContextMenu` 的 `FlatMenuItem`/`FlatMenu`/`FlatCheckBoxMenuItem` 自绘（`paintComponent` 不调 `super`），共用 `paintMenuRow`/`menuRowPreferredSize`，配色只用 `JBColor`，并自己重写 `getPreferredSize()`（46 节）。
 - 调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
 
-### 11. `.datachart` 编辑器双 Tab：图形 + Text（2026-09-24，模式来自 PYYP）
-- `DataChartEditorProvider` 用 `FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR`：保留 IDEA 默认 Text Tab，图形 Tab 排在前面并默认激活。
-- Tab 名 `DataChart.editor.tab.board`（Board / 看板）；Text 名由平台 `TextEditorImpl.getName()` 提供。
+### 11. `.datachart` 编辑器双 Tab：图形 Board + 自研 JSON Text（2026-09-24）
+- **用户偏好（明确要求）**：**不要**把 `.datachart` 的 fileType 语言改成 JSON（保留自定义语言类 `com.wd.editor.DataChart`，
+  Board 行为不变）；Text Tab 的 JSON 高亮/格式化要**自己实现**，参考 `/Users/lww/Desktop/workspace/YamlHelper`（`MyEditorFactory`）。
+- 两个 Tab 都由插件提供：`DataChartEditorProvider`（policy `HIDE_DEFAULT_EDITOR`，同时隐藏平台默认文本编辑器以免两个同名 "Text"）
+  + `DataChartTextEditorProvider`（policy `NONE`）。**Tab 顺序 = plugin.xml 的 `fileEditorProvider` 声明顺序**（Board 先声明）。
+- Tab 名走 i18n：`DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.tab.text`（Text / 文本）。
+- JSON 高亮做法：`new LightVirtualFile(name + ".json", JsonFileType.INSTANCE, text)` → 优先 `PsiManager.findFile` +
+  `PsiDocumentManager.getDocument`（要 PSI，Ctrl+Alt+L 格式化/校验/Structure View 才可用；失败退回 `EditorFactory.createDocument`）
+  → `EditorFactory.createEditor(document, project, lightFile, false, EditorKind.MAIN_EDITOR)`。
 - `EditorFileSync`：VFS_CHANGES 监听外部改动（无修改静默 reload / 有修改弹窗），自触发事件**只能用 `event.getRequestor() == owner` 识别**（事件异步派发，saving/stamp 都不可靠）。
 - 写盘必须 `EditorFileSync.writeContent`：`setBinaryContent(..., requestor)` **再** `doc.setText` + `saveDocument(doc)`，
   否则内置 SaveAll 拿旧 Document 覆盖新内容；写盘期间用 `UndoUtil.disableUndoFor` 隔离撤销栈（`UndoConstants` 已弃用但无替代 → `@SuppressWarnings("deprecation")`）。

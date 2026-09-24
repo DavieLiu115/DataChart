@@ -7,6 +7,12 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
+ * .datachart 文件类型。
+ *
+ * <p>语言仍是插件自定义的 {@link DataChart}（不改成 JSON 语言，避免影响看板/文件类型的既有行为）；
+ * 编辑器 Text Tab 的 JSON 高亮与格式化由 {@code DataChartTextEditor} 用
+ * {@code LightVirtualFile + JsonFileType} 实现（参考 YamlHelper 的做法）。</p>
+ *
  * @author lww
  */
 public class DataToolsFileType extends LanguageFileType {

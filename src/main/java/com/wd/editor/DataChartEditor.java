@@ -203,7 +203,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		} catch (Exception e) {
 			return;
 		}
-		String pretty = ChartJsonUtil.prettifyText(raw);
+		String pretty = ChartJsonUtil.prettifyText(raw, ChartJsonUtil.resolveIndentSize(project));
 		if (pretty == null || pretty.equals(raw)) {
 			return; // 不是合法 JSON，或已经是格式化版本
 		}
@@ -376,7 +376,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	 */
 	private static volatile String cachedModifiedPropertyName;
 
-	private static String getModifiedPropertyName() {
+	static String getModifiedPropertyName() {
 		if (cachedModifiedPropertyName != null) {
 			return cachedModifiedPropertyName;
 		}

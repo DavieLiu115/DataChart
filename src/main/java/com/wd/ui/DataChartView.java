@@ -477,7 +477,8 @@ public class DataChartView extends DialogWrapper {
 	public String serializeToJson() {
 		ChartData data = kanbanBoard.toChartData();
 		data.setAiGuide(aiGuide);
-		return ChartJsonUtil.toPrettyJson(data);
+		// 缩进宽度跟随 IDE 的 JSON 代码风格，保证与 Text Tab 里 Ctrl+Alt+L 的结果一致
+		return ChartJsonUtil.toPrettyJson(data, ChartJsonUtil.resolveIndentSize(project));
 	}
 
 	/**

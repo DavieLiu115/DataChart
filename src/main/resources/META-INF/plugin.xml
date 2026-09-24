@@ -56,7 +56,11 @@
                 implementationClass="com.wd.editor.DataToolsFileType"
                 fieldName="INSTANCE_C"/>
 
+        <!-- 编辑器两个 Tab（顺序即这里的声明顺序）：
+             ① Board：图形看板（自定义 FileEditor，隐藏平台默认文本编辑器）
+             ② Text：JSON 高亮的文本编辑器（LightVirtualFile + JsonFileType，参考 YamlHelper） -->
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
+        <fileEditorProvider implementation="com.wd.editor.DataChartTextEditorProvider"/>
 
         <internalFileTemplate name="DataChart"/>
 

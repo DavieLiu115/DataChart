@@ -1403,6 +1403,10 @@ enabled = ReadAction.compute(() -> {
 
 ### 50. `.datachart` 编辑器双 Tab：图形 + Text（2026-09-24，参考 PYYP）
 
+> ⚠️ **最终形态见本节末尾「最终形态」**：Text Tab 最终由插件自己实现（JSON 高亮），
+> 而不是用平台默认文本编辑器 —— 下面的 `PLACE_BEFORE_DEFAULT_EDITOR` 方案只保留了
+> `EditorFileSync` / `EditorSaveAllHook` 这两块机制，policy 已改回 `HIDE_DEFAULT_EDITOR`。
+
 #### 需求
 打开 `.datachart` 时编辑器顶部出现两个 Tab：左边是图形看板（默认激活），右边是 IDEA 默认的
 **Text** Tab（查看 / 编辑原始 JSON）。参考实现在 `/Users/lww/IdeaProjects/PYYP`：
@@ -1498,4 +1502,49 @@ Text Tab 里是 .datachart 的原始 JSON，而 fastjson 默认 `JSON.toJSONStri
 - `pretty.equals(raw)` 时跳过 → **幂等**，不会反复写盘（用 jshell 验证过 `IDEMPOTENT=true`）；
 - Text Tab 的 Document 有未保存修改时跳过（`FileDocumentManager.isDocumentUnsaved`），不覆盖用户输入；
 - 写盘同样走 `EditorFileSync.writeContent`（带 requestor，自触发事件被过滤）。
+
+#### 最终形态：Text Tab 由插件自己实现（JSON 高亮），不用平台默认文本编辑器
+
+**为什么换**：`.datachart` 的语言是插件自定义的 `DataChart`（没注册词法 / 高亮），
+所以平台默认 Text Tab 是纯黑白文本。用户要的是「Text 里有 JSON 高亮和格式化」，
+参考实现在 `/Users/lww/Desktop/workspace/YamlHelper`（`MyEditorFactory` + `FileTypeHolder.JSON`
++ `PlatformUtil.getFileType(FileTypes.JSON)`）。
+
+> 也考虑过「把 fileType 的 language 直接改成 JSON」，那样 Text Tab 自动获得全部 JSON 能力、
+> 代码最少；但会改变整个文件的 PSI / 语言（用户要求保留自定义语言类与 Board 的既有行为），
+> 因此最终选择「只在 Text Tab 里借用 JSON 能力」。
+
+**两个 Tab 都由插件提供**：
+
+| Tab | provider | policy | 实现 |
+| --- | --- | --- | --- |
+| Board | `DataChartEditorProvider` | `HIDE_DEFAULT_EDITOR` | `DataChartEditor`（图形看板，原样） |
+| Text | `DataChartTextEditorProvider`（新增） | `NONE` | `DataChartTextEditor`（JSON 高亮文本编辑器） |
+
+- Tab 顺序 = **plugin.xml 里 `fileEditorProvider` 的声明顺序**（Board 先声明 → 在左，默认激活）。
+- `HIDE_DEFAULT_EDITOR` 的作用变成「隐藏平台默认文本编辑器」：它的 Tab 名也叫 "Text"，
+  不隐藏就会出现两个同名 Tab。
+
+**JSON 高亮怎么拿到**（核心，照搬 YamlHelper 思路）：
+
+```java
+// 真实文件是 .datachart（自定义语言），但编辑器用 JSON 文件类型的 LightVirtualFile 承载内容，
+// 高亮由这个 lightFile.getFileType() 决定 → 走 IDEA 的 JSON lexer / highlighter / formatter
+lightFile = new LightVirtualFile(file.getNameWithoutExtension() + ".json",
+                                 JsonFileType.INSTANCE, text);
+editor = EditorFactory.getInstance().createEditor(document, project, lightFile, false,
+                                                 EditorKind.MAIN_EDITOR);
+```
+
+- **Document 优先走 PSI**：`PsiManager.findFile(lightFile)` → `PsiDocumentManager.getDocument(psiFile)`，
+  这样 `Ctrl+Alt+L`（Reformat Code）、JSON 语法校验、Structure View 才可用（它们要 PsiFile）；
+  拿不到 PSI 时退回 `EditorFactory.createDocument(text)`（高亮仍在，少 PSI 功能）。
+- 编辑器设置对齐 YamlHelper：行号、缩进导轨、折叠轮廓、caret 行、软换行；关闭错误条纹与拼写检查。
+- 内容是**内存文档**，与真实 .datachart 的同步完全复用第 50 节上面的机制：
+  `EditorFileSync`（VFS 监听 + `writeContent` 双写）+ `EditorSaveAllHook`（平台 Cmd/Ctrl+S），
+  `selectNotify()` 里再兜底比对一次磁盘内容（用户在本 Tab 有未保存修改时不动他的输入）。
+
+**JSON 格式化的风格统一**：见上文 `ChartJsonUtil` —— 缩进宽度取
+`CodeStyle.getSettings(project).getCommonSettings(JsonLanguage.INSTANCE)`（即 IDE 里 JSON 的代码风格），
+所以「插件保存出的 JSON」与「Text Tab 里 Ctrl+Alt+L 的结果」风格一致，不会来回抖。
 

@@ -9,34 +9,34 @@ import com.intellij.openapi.vfs.VirtualFile;
 import org.jetbrains.annotations.NotNull;
 
 /**
+ * .datachart 的 Text Tab（JSON 高亮文本编辑器）提供者。
+ *
+ * <p>与 {@link DataChartEditorProvider}（Board Tab）配对：两个 Tab 都由本插件提供，
+ * 平台默认的纯文本编辑器由 Board provider 的
+ * {@link FileEditorPolicy#HIDE_DEFAULT_EDITOR} 隐藏 —— 因为它的 Tab 名也是 "Text"，
+ * 会和这里的 JSON 版 Text Tab 重名。</p>
+ *
  * @author lww
  */
-public class DataChartEditorProvider implements FileEditorProvider, DumbAware {
+public class DataChartTextEditorProvider implements FileEditorProvider, DumbAware {
 
 	@Override
 	public boolean accept(@NotNull Project project, @NotNull VirtualFile file) {
-		// 根据文件扩展名判断是否接受该文件
 		return DataToolsFileType.EXTENSION.equalsIgnoreCase(file.getExtension());
 	}
 
 	@Override
 	public @NotNull FileEditor createEditor(@NotNull Project project, @NotNull VirtualFile file) {
-		// 创建自定义编辑器
-		return new DataChartEditor(project, file);
+		return new DataChartTextEditor(project, file);
 	}
 
 	@Override
 	public @NotNull String getEditorTypeId() {
-		// 唯一标识符
-		return "DataChartEditorProvider";
+		return "DataChartTextEditorProvider";
 	}
 
 	@Override
 	public @NotNull FileEditorPolicy getPolicy() {
-		// 2026-09-24：Text Tab 改由 DataChartTextEditorProvider 自己提供
-		// （用 LightVirtualFile + JsonFileType 拿到 IDEA 的 JSON 高亮 / 格式化），
-		// 因此这里隐藏平台默认文本编辑器，避免多出一个纯文本的 "Text" Tab。
-		return FileEditorPolicy.HIDE_DEFAULT_EDITOR;
+		return FileEditorPolicy.NONE;
 	}
-
 }
