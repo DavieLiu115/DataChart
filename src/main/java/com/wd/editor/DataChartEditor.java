@@ -2,6 +2,7 @@ package com.wd.editor;
 
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.application.ReadAction;
+import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
@@ -12,6 +13,7 @@ import com.intellij.openapi.project.Project;
 import com.intellij.openapi.util.UserDataHolderBase;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.wd.i18n.DataChartBundle;
+import com.wd.model.ChartJsonUtil;
 import com.wd.ui.DataChartView;
 import com.wd.ui.NotificationUtil;
 import java.awt.BorderLayout;
@@ -41,11 +43,33 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 	/** 最后一次保存成功时的文件修改戳，用于 dispose 时检测磁盘是否被外部修改（2026-08-27） */
 	private long lastSavedStamp = -1;
 
+	/** 图形 Tab ↔ IDEA 默认 Text Tab 的跨 Tab 同步（2026-09-24 新增） */
+	private final EditorFileSync fileSync;
+	/** 平台内置 Save All（Cmd/Ctrl+S）时补位保存画布（2026-09-24 新增） */
+	private final EditorSaveAllHook saveAllHook;
+
 	public DataChartEditor(Project project, VirtualFile file) {
 		this.project = project;
 		this.file = file;
 		// 只创建容器面板,不立即初始化 DataChartView
 		editorPanel = new JPanel(new BorderLayout());
+		if (file != null) {
+			// Text Tab 保存 / 外部工具改动磁盘 → 重新加载画布（有未保存修改时会先问用户）
+			fileSync = new EditorFileSync(project, file, this, () -> modified, () -> {
+				if (!disposed) {
+					reloadFromDisk();
+				}
+			});
+			// 双保险：平台内置 Save All 只保存 Document，这里补上画布的内存模型
+			saveAllHook = new EditorSaveAllHook(project, () -> {
+				if (modified) {
+					saveDocument();
+				}
+			});
+		} else {
+			fileSync = null;
+			saveAllHook = null;
+		}
 	}
 
 	/**
@@ -110,13 +134,20 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 			}
 			final String loaded = content;
 			javax.swing.SwingUtilities.invokeLater(() -> {
-				loading = false;
 				// dispose 后丢弃加载结果，避免重新填充已清理的看板（内存泄漏/悬空引用）
 				if (disposed) {
 					return;
 				}
-				if (loaded != null && !loaded.trim().isEmpty()) {
-					dataView.loadFromJson(loaded);
+				try {
+					if (loaded != null && !loaded.trim().isEmpty()) {
+						dataView.loadFromJson(loaded);
+						// 磁盘上若还是历史遗留的紧凑 JSON，顺手重排成多行（只改空白）
+						prettifyFileIfNeeded(loaded);
+					}
+				} finally {
+					// 2026-09-24 调整：loading 挪到 loadFromJson 之后解除。
+					// 否则重建看板时的变更回调会把"刚打开的文件"直接标记成已修改
+					loading = false;
 				}
 			});
 		});
@@ -135,7 +166,63 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 
 	@Override
 	public @NotNull String getName() {
-		return "DataChartEditor"; // 编辑器名称
+		// 编辑器 Tab 名（与 PYYP 的 Flow / Text 一致：图形 Tab 在前，IDEA 默认 Text Tab 在后）
+		return DataChartBundle.message("DataChart.editor.tab.board");
+	}
+
+	/**
+	 * 丢弃内存中的未保存修改，重新从磁盘加载画布
+	 * （Text Tab 保存、Git 切分支 / pull、其它工具改盘后由 {@link EditorFileSync} 调用）。
+	 */
+	private void reloadFromDisk() {
+		if (disposed || dataView == null) {
+			return;
+		}
+		// 先清修改状态（此时 loading 为 false，setModified 才会生效），再重新加载
+		setModified(false);
+		loadFromFile();
+	}
+
+	/**
+	 * 磁盘内容若是紧凑（单行）JSON，则重排为多行写回，让 Text Tab 打开即是格式化 JSON。
+	 *
+	 * <p>2026-09-24 新增：只重排空白，不改字段顺序与取值（见 {@link ChartJsonUtil#prettifyText}）。
+	 * 文本不是合法 JSON、已经是格式化版本、或 Text Tab 里有未保存修改时，都不动文件。</p>
+	 */
+	private void prettifyFileIfNeeded(String raw) {
+		if (raw == null || raw.isEmpty() || file == null || fileSync == null) {
+			return;
+		}
+		// Text Tab 正在编辑（Document 有未保存修改）时不要插一脚，避免覆盖用户输入
+		try {
+			Document document = FileDocumentManager.getInstance().getDocument(file);
+			if (document != null
+					&& FileDocumentManager.getInstance().isDocumentUnsaved(document)) {
+				return;
+			}
+		} catch (Exception e) {
+			return;
+		}
+		String pretty = ChartJsonUtil.prettifyText(raw);
+		if (pretty == null || pretty.equals(raw)) {
+			return; // 不是合法 JSON，或已经是格式化版本
+		}
+		try {
+			WriteCommandAction.runWriteCommandAction(project, () -> {
+				try {
+					fileSync.beginSave();
+					EditorFileSync.writeContent(file, pretty, this);
+					lastSavedStamp = file.getModificationStamp();
+					LOG.info("已把紧凑的 .datachart 重排为多行 JSON: " + file.getName());
+				} catch (Exception e) {
+					LOG.warn("重排 .datachart 格式失败: " + file.getName(), e);
+				} finally {
+					fileSync.endSave(file.getModificationStamp());
+				}
+			});
+		} catch (Exception e) {
+			LOG.warn("重排 .datachart 格式异常", e);
+		}
 	}
 
 	@Override
@@ -182,32 +269,42 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 					DataChartBundle.message("DataChart.editor.loading.content"));
 			return;
 		}
+		final boolean[] ok = {false};
 		try {
 			// 序列化看板为 JSON
-			String json = dataView.serializeToJson();
-			final boolean[] ok = {false};
-			// 写入文件（字节方式，保持文件类型不变）
-			ApplicationManager.getApplication().runWriteAction(() -> {
+			final String json = dataView.serializeToJson();
+			// 2026-09-24：写盘统一走 EditorFileSync.writeContent ——
+			// 它同时更新 VFS 与 Text Tab 背后的 Document，避免 IDE 内置 SaveAll
+			// 之后拿旧 Document 把刚保存的内容覆盖回旧版本。
+			WriteCommandAction.runWriteCommandAction(project, () -> {
 				try {
-					file.setBinaryContent(json.getBytes(StandardCharsets.UTF_8));
+					if (fileSync != null) {
+						fileSync.beginSave();
+					}
+					EditorFileSync.writeContent(file, json, this);
+					lastSavedStamp = file.getModificationStamp();
 					ok[0] = true;
 				} catch (Exception e) {
 					LOG.warn("保存 .datachart 文件失败: " + file.getName(), e);
+				} finally {
+					if (fileSync != null) {
+						fileSync.endSave(file.getModificationStamp());
+					}
 				}
 			});
-			if (!ok[0]) {
-				NotificationUtil.error(DataChartBundle.message("DataChart.notify.save.failed"),
-						DataChartBundle.message("DataChart.editor.save.writeFailed", file.getName()));
-				return;
-			}
-			lastSavedStamp = file.getModificationStamp();
-			// 保存成功后重置修改状态（文件名恢复，星号消失）
-			setModified(false);
 		} catch (Exception e) {
 			LOG.warn("保存 .datachart 序列化失败", e);
 			NotificationUtil.error(DataChartBundle.message("DataChart.notify.save.failed"),
 					DataChartBundle.message("DataChart.editor.save.serializeFailed", e.getMessage()));
+			return;
 		}
+		if (!ok[0]) {
+			NotificationUtil.error(DataChartBundle.message("DataChart.notify.save.failed"),
+					DataChartBundle.message("DataChart.editor.save.writeFailed", file.getName()));
+			return;
+		}
+		// 保存成功后重置修改状态（文件名恢复，星号消失）
+		setModified(false);
 	}
 
 	/**
@@ -253,6 +350,12 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 			}
 		}
 		// 清理资源
+		if (fileSync != null) {
+			fileSync.dispose();
+		}
+		if (saveAllHook != null) {
+			saveAllHook.dispose();
+		}
 		editorPanel.removeAll();
 		if (dataView != null) {
 			dataView.dispose();

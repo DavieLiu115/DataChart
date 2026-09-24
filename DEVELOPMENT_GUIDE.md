@@ -1399,3 +1399,73 @@ enabled = ReadAction.compute(() -> {
 > 注意：`//noinspection OverrideOnly` 是给 IDE 的 inspection 用的，**不影响编译**；
 > `./gradlew compileJava` 本来就只报 deprecation 之类，不报 OverrideOnly。
 
+---
+
+### 50. `.datachart` 编辑器双 Tab：图形 + Text（2026-09-24，参考 PYYP）
+
+#### 需求
+打开 `.datachart` 时编辑器顶部出现两个 Tab：左边是图形看板（默认激活），右边是 IDEA 默认的
+**Text** Tab（查看 / 编辑原始 JSON）。参考实现在 `/Users/lww/IdeaProjects/PYYP`：
+`.bizx` 的 `EosFlowEditorProvider`、`.datasetx` 的 `EosDatasetEditorProvider` 都是这个模式，
+配套 `EosEditorFileSync`（跨 Tab 同步）+ `EosSaveAllHook`（内置 SaveAll 补位）。
+
+#### 改法（4 步）
+
+1. **Provider 策略**：`HIDE_DEFAULT_EDITOR` → `PLACE_BEFORE_DEFAULT_EDITOR`
+
+```java
+return FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR; // 保留默认 Text Tab，并把图形 Tab 排到它前面
+```
+`PLACE_BEFORE_DEFAULT_EDITOR` 既能保留默认文本编辑器，又能让图形编辑器**排在前面并默认激活**，
+Tab 名分别取自我们 `FileEditor.getName()`（"Board"）与 `TextEditorImpl.getName()`
+（平台内部 `IdeBundle.message("tab.title.text")` → "Text" / 本地化「文本」）。
+
+2. **Tab 名走 i18n**：`DataChartEditor.getName()` 返回 `DataChartBundle.message("DataChart.editor.tab.board")`。
+
+3. **跨 Tab 同步**（新类 `com.wd.editor.EditorFileSync`，逐一对应 PYYP 的 `EosEditorFileSync`）：
+   - 监听 `VirtualFileManager.VFS_CHANGES` 的 `VFileContentChangeEvent`：Text Tab 保存、
+     Git 切分支 / pull、外部工具改盘后刷新画布；有未保存修改时弹窗让用户选择，避免静默丢弃。
+   - **自触发事件必须用 `event.getRequestor() == owner` 精确识别**，不能只靠 `saving` 标志或
+     `modificationStamp`：VFS 事件是**异步派发**的，事件到达时 `saving` 早已复位、stamp 也可能
+     被随后的内置 SaveAll 再写一次而顶掉。
+   - 写盘统一走 `EditorFileSync.writeContent(file, content, requestor)`。
+
+4. **Save All 钩子**（新类 `com.wd.editor.EditorSaveAllHook`）：订阅
+   `FileDocumentManagerListener.TOPIC` 的 `beforeAllDocumentsSaving()`，在其中 `if (modified) saveDocument()`。
+
+#### 三个必须知道的坑
+
+**坑 1：写盘只能走 Document，不能只 `setBinaryContent`**
+Text Tab 背后有一份 `Document`。只写 VFS 不刷新它 → 用户按 Cmd/Ctrl+S 时 IDEA 内置 SaveAll
+（只保存 Document）会拿**旧 Document** 再写一遍盘，把刚保存的新内容覆盖回旧版本
+（症状：保存后内容回滚 / 弹「文件已被外部修改」）。
+所以 `writeContent` 是：`setBinaryContent(..., requestor)` **再** `doc.setText(text)` + `saveDocument(doc)`。
+
+**坑 2：程序性保存不能进撤销栈**
+否则 IDEA 的 Cmd+Z 会一直可用，把画板自己的撤销按键抢走，且撤销的是这次「保存同步」
+（内容被倒回旧版本）。写盘前后用 `UndoUtil.disableUndoFor(file/doc)` 关掉记录。
+⚠️ `UndoConstants` / `DONT_RECORD_UNDO` 在 2024.1 已 `@Deprecated`，但平台**没有**提供
+`enableUndoFor(VirtualFile)`（只有 Document 版）→ 清 VirtualFile 标记只能手动
+`file.putUserData(UndoConstants.DONT_RECORD_UNDO, null)`，用 `@SuppressWarnings("deprecation")` 抑制
+（决策思路见第 49 节）。
+
+**坑 3：`loading` 标志要在 `loadFromJson` **之后**才解除**
+`DataChartEditor.loadFromFile()` 原来是 `loading = false` 后立刻 `loadFromJson(...)`，
+而重建看板会触发变更回调 → **刚打开的文件被标记成「已修改」**。已在本次调整为先 load 再解除。
+
+#### 本次改动清单
+| 文件 | 改动 |
+| --- | --- |
+| `DataChartEditorProvider` | policy → `PLACE_BEFORE_DEFAULT_EDITOR` |
+| `DataChartEditor` | 接入 `EditorFileSync` / `EditorSaveAllHook`；`getName()` 走 i18n；保存改走 `writeContent`；新增 `reloadFromDisk()`；dispose 释放同步器；修正 `loading` 时序 |
+| `EditorFileSync`（新增） | VFS 变更监听 + 自触发过滤 + `writeContent`（VFS/Document 双写、撤销栈隔离） |
+| `EditorSaveAllHook`（新增） | `beforeAllDocumentsSaving` 补位保存画布 |
+| `messages/DataChartBoundle*.properties` | 新增 `DataChart.editor.tab.board`（Board / 看板）、`DataChart.editor.externallyModified.title/message` |
+
+#### 验证
+- `./gradlew compileJava` 通过；顺带在 `build.gradle.kts` 加了 `-Xlint:deprecation`，
+  以后所有过时 API 都能直接看到**具体文件:行号**（本次就是靠它定位到 `UndoConstants` 的）。
+- Tab 顺序 / 双向同步需要 `./gradlew runIde` 手工验证：
+  ① 打开 .datachart 默认落在图形 Tab；② 切到 Text 改 JSON 保存 → 切回图形看到新内容；
+  ③ 图形里改布局按 Cmd+S → 切到 Text 看到同步后的 JSON；④ Cmd+Z 不应把内容倒回旧版本。
+

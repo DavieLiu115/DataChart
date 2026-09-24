@@ -4,6 +4,8 @@
 
 ## 核心架构
 - IntelliJ IDEA 插件，自定义 `.datachart` 文件类型（`com.wd.editor.*`）
+- 编辑器是**双 Tab**：图形 "Board"（默认激活）+ IDEA 默认 "Text"（原始 JSON），
+  靠 `FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR` + `EditorFileSync` / `EditorSaveAllHook`，见第 11 条
 - 画板核心：`KanbanBoard`（编排层）+ 工具类（`BoardPersistence` / `BoardExportUtil` / `BoardContextMenu` / `BoardSnapHelper` / `BoardSearchModel` / `BoardViewport` / `NotificationUtil`）
 - 数据模型：`com.wd.model`（ChartData / TableCardModel / ChartRelation / RelationType）
 - DB 元信息反射：`com.wd.db.DatabaseTableMetadataFetcher`（全反射访问 `com.intellij.database.*`）
@@ -72,3 +74,13 @@
 - **菜单项不要显示快捷键提示**（用户要求）：`JMenuItem.setAccelerator` 在弹窗菜单只展示不生效，会误导用户。
 - **菜单 hover 整行变粉（macOS 强调色）→ 必须完全自绘**：IntelliJ 的 `BegMenuItemUI`/`IdeaMenuUI` 在 `installDefaults()` 用 `JBColor.namedColor(...)` 覆盖 `selectionBackground` 且**全局缓存**，`UIManager.put` 与 client property 全部无效，`IdeaMenuUI.fillBackground()` 的 hover 填充也不受 `isOpaque()` 控制。**唯一可靠解**：`BoardContextMenu` 的 `FlatMenuItem`/`FlatMenu`/`FlatCheckBoxMenuItem` 自绘（`paintComponent` 不调 `super`），共用 `paintMenuRow`/`menuRowPreferredSize`，配色只用 `JBColor`，并自己重写 `getPreferredSize()`（46 节）。
 - 调研与 API 清单：memory/2026-09-21.md；规范见 DEVELOPMENT_GUIDE 第 44、45 节
+
+### 11. `.datachart` 编辑器双 Tab：图形 + Text（2026-09-24，模式来自 PYYP）
+- `DataChartEditorProvider` 用 `FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR`：保留 IDEA 默认 Text Tab，图形 Tab 排在前面并默认激活。
+- Tab 名 `DataChart.editor.tab.board`（Board / 看板）；Text 名由平台 `TextEditorImpl.getName()` 提供。
+- `EditorFileSync`：VFS_CHANGES 监听外部改动（无修改静默 reload / 有修改弹窗），自触发事件**只能用 `event.getRequestor() == owner` 识别**（事件异步派发，saving/stamp 都不可靠）。
+- 写盘必须 `EditorFileSync.writeContent`：`setBinaryContent(..., requestor)` **再** `doc.setText` + `saveDocument(doc)`，
+  否则内置 SaveAll 拿旧 Document 覆盖新内容；写盘期间用 `UndoUtil.disableUndoFor` 隔离撤销栈（`UndoConstants` 已弃用但无替代 → `@SuppressWarnings("deprecation")`）。
+- `EditorSaveAllHook`（`beforeAllDocumentsSaving`）解决"Text Tab 有未保存内容时内置 SaveAll 先消费 Cmd+S，画布改动不落盘"。
+- 教训：`loading` 标志必须在 `loadFromJson` **之后**解除，否则重建看板的变更回调会把刚打开的文件标记成已修改。
+- 详见 DEVELOPMENT_GUIDE 第 50 节。

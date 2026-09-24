@@ -33,8 +33,10 @@ public class DataChartEditorProvider implements FileEditorProvider, DumbAware {
 
 	@Override
 	public @NotNull FileEditorPolicy getPolicy() {
-		// 隐藏默认编辑器
-		return FileEditorPolicy.HIDE_DEFAULT_EDITOR;
+		// 2026-09-24：改为 PLACE_BEFORE_DEFAULT_EDITOR（与 PYYP 的 .bizx / .datasetx 一致）——
+		// 保留 IDEA 默认的 Text Tab，并把图形编辑器排到它前面作为默认激活 Tab。
+		// 两端通过 EditorFileSync 双向同步（跨 Tab 保存 / 外部改动）。
+		return FileEditorPolicy.PLACE_BEFORE_DEFAULT_EDITOR;
 	}
 
 }
