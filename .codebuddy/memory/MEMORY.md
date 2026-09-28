@@ -17,8 +17,13 @@
   本地编译全绿也可能在用户 IDE 上 `NoSuchClassError`。带移除意向的 `@Deprecated` API（尤其常量类 / `Key`），
   要么换等价新 API，要么**反射延迟解析**（`Class.forName` + `Method.invoke`），别硬引用。
   已踩：`UndoConstants`（263 删除）见 `EditorFileSync.setUndoDisabled`（DEVELOPMENT_GUIDE 第 53 节）。
+- ⚠️ **反向也成立：平台"后来才加"的字段同样不能硬引用** —— `plugin.xml` 里 `since-build="223"`，
+  verifier 会把 223~最新之间**每个构建**都核一遍。已踩：`FileDocumentManagerListener.TOPIC`
+  在 2023.2（IU-232.10335.12）还不存在 → `EditorSaveAllHook` 硬引用会 `NoSuchFieldError`，
+  已改为反射取 + 拿不到就跳过注册（见 DEVELOPMENT_GUIDE 第 53.5 节）。
+  所以：支持范围跨过平台 API 变更点时，**新增/被删的字段都不能硬引用**，要么换跨版本都有的 API，要么反射 + 降级。
 - 自查办法（不用等 CI）：`javap -v -p -classpath build/classes/java/main <类全名> | grep <符号>`,
-  确认只剩 `String` 常量、没有 `= Class ...` / 字段引用。
+  确认只剩 `String` 常量、没有 `= Class ...` / 字段引用（`javap -c` 看不到 getstatic 即已改干净）。
 
 ## 项目约定
 - **不要写死用户可见文案（用户明确要求）**：菜单项 / tooltip / 通知 / 对话框一律走
@@ -137,18 +142,26 @@
   `PLACE_BEFORE/AFTER_DEFAULT_EDITOR` **平台没有任何代码读取**（全 jar 只有 `DiffPatchFileEditorProvider` /
   `PerspectiveFileEditorProvider` 声明使用），EP 的 `order="first"/"last"` 实测无效，
   平台 text provider 自己 `order="first"` 且 provider 列表走协程（`filterableLazySequence`）。
-- **其它反编译结论**：`HIDE_DEFAULT_EDITOR` 只移除 `DefaultPlatformFileEditorProvider`（`postProcessResult` 的谓词），
-  挡不住 `PsiAwareTextEditorProvider`（要精准抑制用 `FileEditorProviderSuppressor`，带 project/file 参数，⚠️ 全局 EP 需自己过滤）；
+- **其它反编译结论**：`HIDE_DEFAULT_EDITOR` 只移除 `DefaultPlatformFileEditorProvider`（`postProcessResult` 的谓词）；
+  **`HIDE_OTHER_EDITORS` 是排他语义**（谓词 = `policy != HIDE_OTHER_EDITORS` → 移除除我之外的所有 provider，
+  包括平台文本编辑器）；
   `JSON_PROPERTY_KEY` **不在** `MyHighlighter` 的 token 映射表里（`IDENTIFIER→JSON_IDENTIFIER`、`DOUBLE_QUOTED_STRING→JSON_STRING`）
   → 键色只能在 PSI 层拿到（自定义 lexer 改 token 类型没用）。
 - **保留的机制**：`EditorFileSync`（VFS 监听 + `writeContent` 双写 VFS/Document；自触发事件**只能用
   `event.getRequestor() == owner`** 识别，事件异步派发、saving/stamp 不可靠；写盘期间 `UndoUtil.disableUndoFor` 隔离撤销栈）、
   `EditorSaveAllHook`（`beforeAllDocumentsSaving` 补位保存画布）、
   `ChartJsonUtil`（缩进跟随 IDE 的 JSON 代码风格 + `"k": v` + `prettifyText` 必须带 `Feature.OrderedField`；打开时自动重排、幂等）。
-- **平台自带的文本编辑器必须用 suppressor 抑制**：`<fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>`
-  （`isSuppressed(Project, VirtualFile, FileEditorProvider)` 带文件参数，只对 .datachart 抑制 `instanceof TextEditorProvider`；
-  ⚠️ 该 EP 全局注册，实现里必须自己按文件类型过滤）。否则 IDE 层会多一个纯文本 "Text" tab（按自定义语言 `dataChart` 渲染、无高亮），
-  极易被误判成"我们的 Text 页没高亮"。`HIDE_DEFAULT_EDITOR` / `HIDE_OTHER_EDITORS` 都挡不住它。
+- **平台自带的文本编辑器靠 provider 的 `HIDE_OTHER_EDITORS` 去掉即可，不要用 suppressor**（2026-09-28 更正）：
+  `FileEditorProviderSuppressor` 是 `@ApiStatus.Internal`，Plugin Verifier 会报 internal API usage（已删除实现与注册）。
+  ⚠️ 旧结论"`HIDE_*` 都挡不住它"是错的 —— 那是把 `HIDE_DEFAULT_EDITOR`（只管默认编辑器）与
+  `HIDE_OTHER_EDITORS`（排他）混为一谈；后者能移除平台文本编辑器。
+  ⚠️ 代价：`HIDE_OTHER_EDITORS` 在 **241 里带 `@ApiStatus.Experimental`**（verifier 报 1 条 experimental warning，
+  总体结论仍 Compatible）；263 的报告里已无该节 → 新版已转正。**别改回 suppressor、也别用 `isBinary()=true`**
+  （后者会让 .datachart 变二进制：丢文本 diff / 搜不到文件）。四个方案的对比见 DEVELOPMENT_GUIDE 第 53.2 节。
+- **调用平台动作不要碰 `AnAction.update()/actionPerformed()`**（都是 `@ApiStatus.OverrideOnly`，verifier 报 override-only）：
+  判可用性用 `ActionUtil.lastUpdateAndCheckDumb(action, event, false)` + 读 `event.getPresentation().isEnabled()`；
+  执行用 `ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null)`。
+  这两条取代了 09-23 那条"保留调用 + `//noinspection OverrideOnly`"的做法（见 DEVELOPMENT_GUIDE 第 53.3 节）。
 - **内部页签贴底部**（用户要求）：`tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom)`
   —— 默认 top 会与 IDE 自己的 Tab 栏叠在一起。⚠️ `setTabsPosition` 在 `JBTabsPresentation` 上（不是 `JBTabs`）；
   `JBTabsPosition` 枚举常量是**小写** `top/left/bottom/right`；平台只有四边、无"靠右"选项，底部时页签自左侧排列。

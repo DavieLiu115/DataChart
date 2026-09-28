@@ -2092,6 +2092,20 @@ if (hideOther)   providers.removeIf(postProcessResult$2);   // 谓词 = policy !
 > 教训：`HIDE_DEFAULT_EDITOR` 确实只管"默认编辑器"那一个 provider；
 > 但 `HIDE_OTHER_EDITORS` 是"排他"语义 —— 当初把两者混为一谈，才绕道去用了内部接口。
 
+**⚠️ 但换完还有个取舍要交代：`HIDE_OTHER_EDITORS` 在 241 里带 `@ApiStatus.Experimental`**
+（241.19416.15 的 verifier 报告会把上面两条 internal 换成一条 "experimental API usage: FileEditorPolicy.HIDE_OTHER_EDITORS"）。
+四个方案对比（用 `javap` 逐个确认过注解）：
+
+| 方案 | verifier | 代价 |
+| --- | --- | --- |
+| **`HIDE_OTHER_EDITORS`（现方案）** | 1 条 experimental（warning；241 报告总体结论仍是 **Compatible**） | 无功能代价；且 263 的报告里**已没有这一节** → 新版已转正，会自然消失 |
+| `FileEditorProviderSuppressor`（旧方案） | 2 条 internal（"不得在平台外使用"） | 平台内部实现，随时可能改签名 |
+| 什么都不做 | 0 | IDE 层多一个纯文本 "Text" tab（用户明确不喜欢，且易误判高亮失效） |
+| `FileType.isBinary() = true` | 0（纯公开 API） | 平台不再为它建文本编辑器，但 **`.datachart` 被当二进制** → 丢失文本 diff、Find in Path 搜不到；JSON 文件不能接受 |
+
+结论：**保留 `HIDE_OTHER_EDITORS`** —— experimental 是"可能变"，internal 是"不该用"，
+前者风险更低且已被平台转正；真出问题也只影响 tab 数量这一个外观行为。
+
 #### 53.3 `AnAction.update() / actionPerformed()`（override-only）→ `ActionUtil` 公开入口
 
 verifier 报：
@@ -2114,7 +2128,58 @@ Override-only method usage violations (2)
 - `doPerformActionOrShowPopup` 是 `@ApiStatus.Internal`，**不要**用它替代。
 - 重新扫字节码确认：全项目已无 `AnAction.update / actionPerformed / beforeActionPerformedUpdate` 的直接调用。
 
-#### 53.4 尚未定位：8 个 deprecated + 1 个 scheduled for removal
+#### 53.4 对照：2024.1.7（IU-241.19416.15）报告逐项结果
+
+| 报告项 | 代码位置 | 处理 |
+| --- | --- | --- |
+| Internal interface usage: `FileEditorProviderSuppressor` | `DataChartTextEditorSuppressor` | 删实现 + 删注册（53.2）✅ |
+| Internal method usage: `FileEditorProviderSuppressor.isSuppressed(...)` | 同上 | 同上 ✅ |
+| Scheduled for removal: `UndoConstants.DONT_RECORD_UNDO` | `EditorFileSync.setUndoDisabled` | 改反射降级 + "恢复不了就不禁用"门禁（53.1）✅ |
+| Scheduled for removal: `UndoConstants` | 同上 | 已无硬引用（只剩 `Class.forName` 的字符串）✅ |
+| Override-only: `AnAction.update(AnActionEvent)` | `TableNavigator.performDatabaseAction` | 换 `ActionUtil.lastUpdateAndCheckDumb`（53.3）✅ |
+| Experimental: `FileEditorPolicy.HIDE_OTHER_EDITORS` | `DataChartEditorProvider.getPolicy()` | **保留**（四个方案对比见 53.2 末尾）⚠️ |
+
+> 本地开发平台是 **241.19072.14**，这份报告用的是 **241.19416.15**（同大版本、稍新的补丁）——
+> 所以内容本地也能推断：前三类已全部消除。
+> 报告里另有一条 "Dependencies used → (failed) (optional) module `intellij.profiler.common`"，
+> 那是 `com.intellij.database`（可选依赖）在 IU 里传递依赖 `intellij.profiler.common` 模块带来的，
+> **不在我们代码可控范围**（且报告总体结论是 Compatible），暂不处理。
+
+#### 53.5 2023.2（IU-232.10335.12）：`FileDocumentManagerListener.TOPIC` 字段还不存在
+
+verifier 报（**Compatibility problem**，不是 warning）：
+
+```
+Field not found (1)
+  Access to unresolved field FileDocumentManagerListener.TOPIC
+    Method EditorSaveAllHook.<init>(Project, Runnable) contains a getstatic instruction ...
+    This can lead to NoSuchFieldError exception at runtime.
+```
+
+原因：这个 Topic 字段是**后来才加进平台**的（241 里是
+`public static final Topic<FileDocumentManagerListener> TOPIC`），
+而 `plugin.xml` 声明 `since-build="223"` → verifier 会把 223~最新之间的**每个构建**都对照一遍，
+走到 2023.2 就发现"字段还不存在"。硬引用在老 IDE 上是直接 `NoSuchFieldError`。
+
+修法：`EditorSaveAllHook` 里 Topic 改**反射获取**，拿不到就不注册钩子：
+
+```java
+SAVE_ALL_TOPIC = FileDocumentManagerListener.class.getField("TOPIC").get(null);  // 不存在 → null
+...
+if (SAVE_ALL_TOPIC == null) { LOG.info("...跳过 SaveAll 钩子"); return; }
+```
+
+- **优雅降级**：2023.2 及更早，"平台 Save All 时补位保存画布"这条失效，但**画布自己的 Cmd/Ctrl+S 保存照常工作**
+  （钩子本来就是双保险的补充），不报错、不崩；
+- 字节码自查：`javap -c -p -classpath build/classes/java/main com.wd.editor.EditorSaveAllHook | grep FileDocumentManagerListener.TOPIC`
+  应为空（该字段名只作为反射用的字符串常量存在）；
+- 另一条路是**把 `since-build` 提到 233**，verifier 就不会再核 2023.2 —— 代价是丢掉 223~232 的用户，**没采用**。
+
+> 与 53.1 对照着看，这是同一类坑的**两个方向**：53.1 是"字段被删了"，这里是"字段还没加"。
+> 只要插件的支持范围跨过了平台 API 的变更点，**新增/删除的字段都不能硬引用** ——
+> 要么换成跨版本都有的 API，要么反射 + 降级。
+
+#### 53.6 尚未定位：8 个 deprecated + 1 个 scheduled for removal
 
 这两类是相对 **IU-263** 的警告，本地 241 编译**没有任何 deprecation 输出**，所以列不出来。
 需要把 verifier 报告里这两节展开（或提供 HTML/JSON 报告）才能逐个替换。
