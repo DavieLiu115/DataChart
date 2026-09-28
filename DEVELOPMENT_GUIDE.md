@@ -1864,38 +1864,34 @@ syntaxHighlighterFactory/annotator/ParserDefinition 那套也因此全部删除�
 **验证**：`runIde` 看 ① IDE 层只有一个 tab（文件名）；② 编辑器内 `Board | Text`，Board 在左且默认选中；
 ③ Text 高亮与 .json 文件一致（键名紫、字符串绿、`true/false` 蓝）；④ 切页签 / Cmd+S / 双向同步正常。
 
-#### 补充：平台自带的 Text Tab 必须用 `FileEditorProviderSuppressor` 抑制（2026-09-24）
+#### 补充：平台自带的 Text Tab 怎么去掉（2026-09-24 首版有误 → 2026-09-28 更正）
 
 **现象**：内部页签做完后，IDE 层面仍出现 `<文件名> | Text` 两个 tab；点开 "Text" 那个是**纯黑白文本**，
 非常容易被误判成"我们自己的 Text 页没有高亮"。
 
-**根因**：那个 Text tab 是**平台自带的文本编辑器**（`PsiAwareTextEditorProvider`）。
-它按文件语言（我们自定义的 `dataChart`）渲染，而该语言没注册词法 / 高亮 → 纯文本。
-`FileEditorPolicy.HIDE_OTHER_EDITORS`（和 `HIDE_DEFAULT_EDITOR`）**都挡不住它**：
-`FileEditorProviderManagerImpl.postProcessResult` 只有两个 removeIf 分支
-（`HIDE_DEFAULT_EDITOR` 的谓词是 `it is DefaultPlatformFileEditorProvider`），
-而 `PsiAwareTextEditorProvider` 是**独立 EP 注册**的（`META-INF/LangExtensions.xml`，id `text-editor`、
-`order="first"`），不在这些分支的处理范围内。
+**根因**：那个 Text tab 是**平台自带的文本编辑器**（`PsiAwareTextEditorProvider`，EP
+`META-INF/LangExtensions.xml`，id `text-editor`、`order="first"`）。它按文件语言（自定义的 `dataChart`）渲染，
+而该语言没注册词法 / 高亮 → 纯文本。
 
-**解法**：`FileEditorProviderSuppressor`（EP `com.intellij.fileEditorProviderSuppressor`）：
-
-```xml
-<fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
-```
+**正确解法：靠 `FileEditorPolicy.HIDE_OTHER_EDITORS`（公开枚举，无需任何内部 API）。**
+反编译 `FileEditorProviderManagerImpl.postProcessResult` 可见它是"排他"语义：
 
 ```java
-public boolean isSuppressed(@NotNull Project project, @NotNull VirtualFile file,
-                            @NotNull FileEditorProvider provider) {
-    // 只对 .datachart 抑制平台文本编辑器；插件自己的编辑器（Board/Text 都在其内部）不受影响
-    return DataToolsFileType.EXTENSION.equalsIgnoreCase(file.getExtension())
-            && provider instanceof TextEditorProvider;
-}
+if (hideOther) providers.removeIf(postProcessResult$2);   // 谓词 = policy != HIDE_OTHER_EDITORS
 ```
 
-⚠️ 该 EP 是**全局注册**的，实现里必须自己按文件类型过滤，否则会把所有文件的文本编辑器都干掉。
+即"移除除我之外的所有 provider" → 平台文本编辑器自然被移除 ✅。
 
-**判定经验**：`.datachart` 一旦出现多余/同名的 tab、且其中一个是纯文本，
-先怀疑"平台的 `PsiAwareTextEditorProvider` 没被抑制"，而不是先怀疑自己的高亮代码。
+> ⚠️ **本节 2026-09-24 的初版结论是错的**：当时写"`HIDE_OTHER_EDITORS` 也挡不住，只有
+> `FileEditorProviderSuppressor` 能"，于是引入了 `com.intellij.openapi.fileEditor.impl.FileEditorProviderSuppressor`
+> —— 它是 `@ApiStatus.Internal`，被 Plugin Verifier 报了两条 internal API usage（见第 53.2 节），
+> 已于 2026-09-28 删除实现与注册。
+>
+> 搞错的根源：把 `HIDE_DEFAULT_EDITOR`（只管 `DefaultPlatformFileEditorProvider` 那一个）与
+> `HIDE_OTHER_EDITORS`（排他）当成一回事了。
+
+**判定经验**：`.datachart` 出现多余/同名的 tab、且其中一个是纯文本时，
+先确认我们的 provider 是否真的声明了 `HIDE_OTHER_EDITORS`（读字节码即可判定，不必跑 IDE）。
 
 ---
 
@@ -2033,7 +2029,13 @@ fastjson 的 smartMatch 会忽略下划线，所以**旧文件的 `_aiGuide` 依
 
 ---
 
-### 53. `UndoConstants` 被新平台删除 → 反射降级（2026-09-28）
+### 53. Plugin Verifier 兼容性：三类问题的修法（2026-09-28）
+
+> 背景：你在 **IU-263.5701.42** 上跑 verifier，而本地开发用的是 **IU-241.19072.14**。
+> 报告里 4 类问题中，"内部 API / override-only" 这类本地也能通过读字节码推断并修掉；
+> "deprecated / scheduled for removal" 是**相对 263** 的，本地编译（241）看不到。
+
+#### 53.1 `UndoConstants` 被新平台删除 → 反射降级
 
 #### 现象
 Plugin Verifier 在 **IU-263.5701.42** 上报（本地开发用的是 IU-241.19072.14，编译期完全看不出来）：
@@ -2063,6 +2065,59 @@ Class not found (1)
 - `Class.forName("com.intellij.openapi.command.undo.UndoConstants")` 只是**字符串常量**，
   字节码里不再有类引用，verifier 不会再报（下面有验证办法）。
 - 反射统一 `catch (Throwable) → null`：旧 IDE 行为完全不变，新 IDE 自动走另一条分支。
+
+#### 53.2 内部 API `FileEditorProviderSuppressor` → 删掉，`HIDE_OTHER_EDITORS` 才是正解
+
+verifier 报：
+```
+Internal interface usage: FileEditorProviderSuppressor
+Internal method usage:    FileEditorProviderSuppressor.isSuppressed(...)
+```
+
+第 50 节当初的结论"`HIDE_*` 挡不住平台文本编辑器、只有 suppressor 能"是**错的** ——
+反编译 `FileEditorProviderManagerImpl.postProcessResult` 可见它先扫一遍所有 provider：
+
+```java
+boolean hideDefault |= p.getPolicy() == HIDE_DEFAULT_EDITOR;
+boolean hideOther   |= p.getPolicy() == HIDE_OTHER_EDITORS;
+...
+if (hideDefault) providers.removeIf(postProcessResult$1);   // 只移除 DefaultPlatformFileEditorProvider
+if (hideOther)   providers.removeIf(postProcessResult$2);   // 谓词 = policy != HIDE_OTHER_EDITORS → 移除"除我之外的所有人"
+```
+
+即 **`HIDE_OTHER_EDITORS` 会把平台文本编辑器一并移除** —— 这正是我们想要的效果，
+而且用的是公开枚举值，没有内部 API。所以直接删掉 `DataChartTextEditorSuppressor` + plugin.xml 的
+`<fileEditorProviderSuppressor>` 注册即可（两处 internal 警告同时消失）。
+
+> 教训：`HIDE_DEFAULT_EDITOR` 确实只管"默认编辑器"那一个 provider；
+> 但 `HIDE_OTHER_EDITORS` 是"排他"语义 —— 当初把两者混为一谈，才绕道去用了内部接口。
+
+#### 53.3 `AnAction.update() / actionPerformed()`（override-only）→ `ActionUtil` 公开入口
+
+verifier 报：
+```
+Override-only method usage violations (2)
+  AnAction.actionPerformed(AnActionEvent)
+  AnAction.update(AnActionEvent)
+```
+位置在 `TableNavigator.performDatabaseAction`（我们自建 DataContext 去跑 Database 插件的原生动作）。
+此前（第 49 节）判断"平台没有无副作用的等价入口"因而保留调用 + 行级抑制 —— 现在必须换掉。
+查 `ActionUtil` 的 javap 注解后改用两个**公开**入口：
+
+| 用途 | 原写法 | 现在 |
+| --- | --- | --- |
+| 刷新状态 / 判可用 | `action.update(event)` | `ActionUtil.lastUpdateAndCheckDumb(action, event, false)`，再读 `event.getPresentation().isEnabled()` |
+| 执行 | `action.actionPerformed(event)` | `ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null)`（平台内部会再跑一次 update + actionPerformed） |
+
+- `lastUpdateAndCheckDumb` 内部会 `commitDocumentsIfNeeded()` —— 平台执行动作前的常规步骤，可接受；
+- 它抛异常时**不当作"不可用"**，而是跳过判断直接尝试执行（版本 / 线程差异不该让功能失灵）；
+- `doPerformActionOrShowPopup` 是 `@ApiStatus.Internal`，**不要**用它替代。
+- 重新扫字节码确认：全项目已无 `AnAction.update / actionPerformed / beforeActionPerformedUpdate` 的直接调用。
+
+#### 53.4 尚未定位：8 个 deprecated + 1 个 scheduled for removal
+
+这两类是相对 **IU-263** 的警告，本地 241 编译**没有任何 deprecation 输出**，所以列不出来。
+需要把 verifier 报告里这两节展开（或提供 HTML/JSON 报告）才能逐个替换。
 
 #### 验证（不用等 CI）
 ```bash

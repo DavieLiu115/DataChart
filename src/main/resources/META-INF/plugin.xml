@@ -63,11 +63,11 @@
              policy=HIDE_OTHER_EDITORS：隐藏平台自带的文本编辑器等，避免 IDE 层多出 tab -->
         <fileEditorProvider implementation="com.wd.editor.DataChartEditorProvider"/>
 
-        <!-- 抑制平台自带的文本编辑器对 .datachart 生效：它按自定义语言 dataChart 渲染（无高亮），
-             且 Tab 名也叫 "Text"，会和我们编辑器内部的 JSON 高亮 Text 页混淆。
-             ⚠️ policy 里的 HIDE_DEFAULT_EDITOR / HIDE_OTHER_EDITORS 挡不住独立 EP 注册的
-             PsiAwareTextEditorProvider，只有 FileEditorProviderSuppressor（带 project/file 参数）能精准抑制 -->
-        <fileEditorProviderSuppressor implementation="com.wd.editor.DataChartTextEditorSuppressor"/>
+        <!-- 平台自带的文本编辑器（PsiAwareTextEditorProvider）不用单独抑制：
+             上面 provider 的 policy=HIDE_OTHER_EDITORS 就会把"除我之外的所有 provider"移除
+             （FileEditorProviderManagerImpl.postProcessResult 里是按 policy 做 removeIf，已用 javap 核实）。
+             ⚠️ 不要再用 <fileEditorProviderSuppressor>：FileEditorProviderSuppressor 是 @ApiStatus.Internal，
+             Plugin Verifier 会报 "internal API usage"，2026-09-28 已删除该实现。 -->
 
         <internalFileTemplate name="DataChart"/>
 

@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
@@ -31,8 +32,10 @@ import org.jetbrains.annotations.Nullable;
  * <ol>
  *   <li>把 {@code .datachart} 中持久化的「数据源 + 表名」现场解析回 PSI 元素
  *       （{@code DbElement}，见 {@link DatabaseTableMetadataFetcher#resolveDbElement}）；</li>
- *   <li>构造携带该 PSI 元素的 {@link DataContext}，用 {@code action.update()} 判断可用性后
- *       调用 {@code actionPerformed()}。</li>
+ *   <li>构造携带该 PSI 元素的 {@link DataContext}，用 {@code ActionUtil.lastUpdateAndCheckDumb}
+ *       刷新状态、判断可用性，再用 {@code ActionUtil.invokeAction} 执行
+ *       （<b>不</b>直接调 {@code AnAction.update()} / {@code actionPerformed()}，二者是
+ *       {@code @ApiStatus.OverrideOnly}，见 2026-09-28 的改法说明）。</li>
  * </ol>
  *
  * <p>不缓存 PSI 元素：数据源同步 / IDE 重启后元素会失效，每次跳转都重新解析，
@@ -220,34 +223,27 @@ public final class TableNavigator {
 		AnActionEvent event = AnActionEvent.createFromDataContext(
 				ActionPlaces.POPUP, action.getTemplatePresentation().clone(), dataContext);
 
-		// update() 内部通常也要读 PSI，包在 read action 中；
-		// actionPerformed() 放到 read action 外面执行（它可能触发写操作 / 弹窗）
-		//
-		// 关于 AnAction.update() 的 @ApiStatus.OverrideOnly 告警：
-		//   update() 的本意是"只由平台调用、由动作自己覆写"，但本场景正是平台内部的用法——
-		//   在**合成的** DataContext 上主动询问动作是否可用，再决定执行还是提示"当前不可用"。
-		//   平台没有暴露无副作用的等价公共入口：
-		//     - ActionUtil.lastUpdateAndCheckDumb(...) 会先 commitDocumentsIfNeeded()（有落盘副作用）；
-		//     - ActionUtil.performDumbAwareUpdate(...) 内含 ActionUpdateThread 断言，
-		//       跨线程调用可能被判定为非法（异常后功能就会退化成"动作执行失败"）。
-		//   因此保留直接调用，仅对这条 inspection 做行级抑制。
-		boolean enabled;
+		// 2026-09-28：不再直接调 AnAction.update() / actionPerformed() ——
+		// 两者都标了 @ApiStatus.OverrideOnly（"只由平台调用 / 只由动作自己覆写"），
+		// Plugin Verifier 会报 "override-only API usage violation"。改用平台公开入口：
+		//   ① ActionUtil.lastUpdateAndCheckDumb(...)：让平台刷新 presentation
+		//      （内部处理 dumb 模式与 ActionUpdateThread 的线程要求），之后读 isEnabled() 判断可用性；
+		//      ⚠️ 它内部会先 commitDocumentsIfNeeded() —— 平台执行动作前的常规步骤，可接受；
+		//   ② ActionUtil.invokeAction(...)：真正执行（平台内部会再跑一次 update + actionPerformed）。
+		boolean enabled = true;
 		try {
-			enabled = ReadAction.compute(() -> {
-				//noinspection OverrideOnly
-				action.update(event);
-				return event.getPresentation().isEnabled();
-			});
+			ActionUtil.lastUpdateAndCheckDumb(action, event, false);
+			enabled = event.getPresentation().isEnabled();
 		} catch (Exception e) {
-			LOG.warn("跳转动作 update 异常: " + actionId, e);
-			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
+			// 版本 / 线程差异导致的异常不该影响功能：跳过可用性判断，直接尝试执行
+			LOG.warn("跳转动作 update 检查失败，改为直接尝试执行: " + actionId, e);
 		}
 		if (!enabled) {
 			LOG.warn("跳转动作在当前上下文被置灰: " + actionId + ", place=" + ActionPlaces.POPUP);
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.disabled", actionId));
 		}
 		try {
-			action.actionPerformed(event);
+			ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null);
 		} catch (Exception e) {
 			LOG.warn("跳转动作执行异常: " + actionId, e);
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
