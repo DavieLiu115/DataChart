@@ -12,6 +12,14 @@
 - DB 元信息反射：`com.wd.db.DatabaseTableMetadataFetcher`（全反射访问 `com.intellij.database.*`）
 - 表跳转：`com.wd.db.TableNavigator`（复用 Database 原生能力，见"第 10 条"）
 
+## 平台兼容性（重要）
+- **本地 IDEA 版本 ≠ 目标平台**：本地是 **IU-241.19072.14**，但 Plugin Verifier 校验的是更新的构建（如 IU-263）——
+  本地编译全绿也可能在用户 IDE 上 `NoSuchClassError`。带移除意向的 `@Deprecated` API（尤其常量类 / `Key`），
+  要么换等价新 API，要么**反射延迟解析**（`Class.forName` + `Method.invoke`），别硬引用。
+  已踩：`UndoConstants`（263 删除）见 `EditorFileSync.setUndoDisabled`（DEVELOPMENT_GUIDE 第 53 节）。
+- 自查办法（不用等 CI）：`javap -v -p -classpath build/classes/java/main <类全名> | grep <符号>`,
+  确认只剩 `String` 常量、没有 `= Class ...` / 字段引用。
+
 ## 项目约定
 - **不要写死用户可见文案（用户明确要求）**：菜单项 / tooltip / 通知 / 对话框一律走
   `com.wd.i18n.DataChartBundle.message(key, params...)`；日志可以写中文。

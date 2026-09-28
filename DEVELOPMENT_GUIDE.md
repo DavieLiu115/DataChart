@@ -2031,3 +2031,53 @@ fastjson 的 smartMatch 会忽略下划线，所以**旧文件的 `_aiGuide` 依
 > 教训：给 AI 看的"格式说明"必须**照着真实序列化结果写**，不能照着模型源码的字段名写 ——
 > `isXxx` 这类布尔字段被 fastjson 改名就是典型；写完用 jshell `JSON.toJSONString(实例)` 打印一次最保险。
 
+---
+
+### 53. `UndoConstants` 被新平台删除 → 反射降级（2026-09-28）
+
+#### 现象
+Plugin Verifier 在 **IU-263.5701.42** 上报（本地开发用的是 IU-241.19072.14，编译期完全看不出来）：
+
+```
+Class not found (1)
+  Access to unresolved class UndoConstants (1)
+    Method EditorFileSync.setUndoDisabled(...) references an unresolved class UndoConstants.
+    This can lead to NoSuchClassError exception at runtime.
+```
+
+#### 背景
+`UndoConstants.DONT_RECORD_UNDO` 在 2024.1 就已 `@Deprecated`（第 50 节记过），到 263 直接**删掉了类**。
+而我们写盘时要"不进撤销栈"，用 `UndoUtil.disableUndoFor(VirtualFile)` 打标记后
+**必须手动清**这个 Key（2024.1 没有 `enableUndoFor(VirtualFile)`）→ 硬引用就这样留进了字节码。
+
+#### 改法（`EditorFileSync.setUndoDisabled`）
+只依赖稳定的公开 API，不稳的一律反射探测、取不到就降级：
+
+| 对象 | 禁用 | 恢复 |
+| --- | --- | --- |
+| `Document` | `UndoUtil.disableUndoFor(doc)` | `UndoUtil.enableUndoFor(doc)`（各版本对称存在，直接用） |
+| `VirtualFile` | `UndoUtil.disableUndoFor(file)` | 新平台：反射调 `UndoUtil.enableUndoFor(VirtualFile)`；旧平台：反射清 `DONT_RECORD_UNDO` |
+
+- **关键决策**：`canRestoreUndoFlag()` 为 false 时**干脆不禁用** ——
+  标记一旦挂上却清不掉，会让该文件的撤销功能**永久失效**，比"少一层保险"严重得多。
+- `Class.forName("com.intellij.openapi.command.undo.UndoConstants")` 只是**字符串常量**，
+  字节码里不再有类引用，verifier 不会再报（下面有验证办法）。
+- 反射统一 `catch (Throwable) → null`：旧 IDE 行为完全不变，新 IDE 自动走另一条分支。
+
+#### 验证（不用等 CI）
+```bash
+# 1) 编译
+./gradlew compileJava
+# 2) 字节码里只应剩 String 常量，不能有 Class 常量 / 字段引用
+javap -v -p -classpath build/classes/java/main com.wd.editor.EditorFileSync | grep UndoConstants
+#    期望：只有 "#239 = String ... UndoConstants" 这类一行；出现 "= Class ..." 或 "UndoConstants." 就是还没改干净
+# 3) 官方校验（需联网下载 verifier 与目标 IDE，慢）
+./gradlew verifyPlugin
+```
+
+#### 教训
+**"本地能编译" ≠ "兼容目标平台"**。凡是 `@Deprecated` 且明显要移除的平台 API
+（尤其是常量类 / `Key` 这类"内部实现细节"），要么换成等价新 API，
+要么**反射延迟解析**（`Class.forName` + `Method.invoke`），不要硬引用 ——
+否则就是这种"本地全绿、用户 IDE 运行时崩"的坑。同理适用于所有只在自己 IDE 上验证过的插件改动。
+

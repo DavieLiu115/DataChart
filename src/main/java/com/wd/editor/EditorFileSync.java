@@ -1,13 +1,13 @@
 package com.wd.editor;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.command.undo.UndoConstants;
 import com.intellij.openapi.command.undo.UndoUtil;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
 import com.intellij.openapi.fileEditor.FileDocumentManager;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.ui.Messages;
+import com.intellij.openapi.util.Key;
 import com.intellij.openapi.util.text.StringUtil;
 import com.intellij.openapi.vfs.VirtualFile;
 import com.intellij.openapi.vfs.VirtualFileManager;
@@ -17,6 +17,8 @@ import com.intellij.openapi.vfs.newvfs.events.VFileEvent;
 import com.intellij.util.messages.MessageBusConnection;
 import com.wd.i18n.DataChartBundle;
 import java.io.IOException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.function.BooleanSupplier;
@@ -202,30 +204,92 @@ final class EditorFileSync {
 	/**
 	 * 打开 / 关闭「本次改动不记入撤销栈」标记。
 	 *
-	 * <p>{@code UndoUtil} 提供了 {@code disableUndoFor(VirtualFile/Document)}，但<b>没有</b>
-	 * VirtualFile 版的 {@code enableUndoFor}（2024.1 只有 Document 版）；查其实现可知两者都只是
-	 * 往对象上挂 {@code UndoConstants.DONT_RECORD_UNDO} 标记，所以 VirtualFile 的还原只能手动清该 Key。</p>
+	 * <p><b>2026-09-28 重写：不再硬引用 {@code UndoConstants}。</b>
+	 * Plugin Verifier 在 IU-263.5701.42 上报
+	 * {@code Method EditorFileSync.setUndoDisabled(...) references an unresolved class UndoConstants}
+	 * —— 该类已从新平台删除，硬引用会导致运行时 {@code NoSuchClassError}。
+	 * 现在只依赖稳定的公开 API + 反射探测：</p>
 	 *
-	 * <p>⚠️ {@code UndoConstants} 与 {@code DONT_RECORD_UNDO} 在 2024.1 已被标记 {@code @Deprecated}，
-	 * 但平台没有给出等价的新 API（既没有 enableUndoFor(VirtualFile)，也没有新的标记 Key），
-	 * 因此只能保留调用并抑制告警 —— 一旦平台补上 enableUndoFor(VirtualFile) 就应替换。</p>
+	 * <ul>
+	 *   <li><b>Document</b>：{@code UndoUtil.disableUndoFor/enableUndoFor(Document)} 各版本都有且对称 → 直接用；</li>
+	 *   <li><b>VirtualFile</b>：{@code disableUndoFor(VirtualFile)} 各版本都有，但"恢复"这件事
+	 *       在新平台是 {@code enableUndoFor(VirtualFile)}，旧平台（2024.1 只有 Document 版）
+	 *       只能靠 {@code UndoConstants.DONT_RECORD_UNDO} 那个 Key 清标记 → 两者都只能反射拿。
+	 *       <b>两个办法都拿不到时干脆不禁用</b>：宁可少一层保险，也不能让该文件的撤销功能永久失效
+	 *       （标记一旦挂上就再也清不掉）。</li>
+	 * </ul>
 	 */
-	@SuppressWarnings("deprecation")
 	private static void setUndoDisabled(@Nullable VirtualFile file, @Nullable Document doc,
 			boolean disabled) {
-		if (file != null) {
-			if (disabled) {
-				UndoUtil.disableUndoFor(file);
-			} else {
-				file.putUserData(UndoConstants.DONT_RECORD_UNDO, null);
-			}
-		}
 		if (doc != null) {
 			if (disabled) {
 				UndoUtil.disableUndoFor(doc);
 			} else {
 				UndoUtil.enableUndoFor(doc);
 			}
+		}
+		if (file == null) {
+			return;
+		}
+		if (disabled) {
+			if (canRestoreUndoFlag()) {
+				UndoUtil.disableUndoFor(file);
+			}
+			return;
+		}
+		if (UNDO_ENABLE_FOR_FILE != null) {
+			try {
+				UNDO_ENABLE_FOR_FILE.invoke(null, file);
+			} catch (Exception e) {
+				LOG.warn("恢复 VirtualFile 撤销标记失败: " + file.getName(), e);
+			}
+		} else if (LEGACY_DONT_RECORD_UNDO != null) {
+			restoreLegacyUndoFlag(file);
+		}
+	}
+
+	/** {@code UndoUtil.enableUndoFor(VirtualFile)}：新平台才有（旧平台只有 Document 版）。 */
+	private static final Method UNDO_ENABLE_FOR_FILE =
+			findStaticMethod(UndoUtil.class, "enableUndoFor", VirtualFile.class);
+
+	/**
+	 * 旧平台清 {@code VirtualFile} 标记用的 {@code UndoConstants.DONT_RECORD_UNDO}。
+	 *
+	 * <p>⚠️ {@code UndoConstants} 在新平台（IU-263 起）已被删除，<b>不能硬引用</b>
+	 * （Plugin Verifier 会报 "Access to unresolved class"，运行时会 NoSuchClassError），
+	 * 所以只能反射取；取不到就是 {@code null}。</p>
+	 */
+	private static final Key<?> LEGACY_DONT_RECORD_UNDO = findLegacyUndoKey();
+
+	/** 能否把 VirtualFile 上的「不记撤销」标记恢复回去 —— 决定要不要去设置它。 */
+	private static boolean canRestoreUndoFlag() {
+		return UNDO_ENABLE_FOR_FILE != null || LEGACY_DONT_RECORD_UNDO != null;
+	}
+
+	/** 清掉旧平台的 {@code DONT_RECORD_UNDO} 标记。 */
+	@SuppressWarnings("unchecked")
+	private static void restoreLegacyUndoFlag(@NotNull VirtualFile file) {
+		file.putUserData((Key<Boolean>) LEGACY_DONT_RECORD_UNDO, null);
+	}
+
+	/** 反射取公开静态方法；方法不存在 / 签名不符时返回 {@code null}（调用方据此降级）。 */
+	private static Method findStaticMethod(Class<?> owner, String name, Class<?>... parameterTypes) {
+		try {
+			Method method = owner.getMethod(name, parameterTypes);
+			return Modifier.isStatic(method.getModifiers()) ? method : null;
+		} catch (Throwable t) {
+			return null;
+		}
+	}
+
+	/** 反射取旧平台的 {@code UndoConstants.DONT_RECORD_UNDO}（该类在新平台已删除，不能硬引用）。 */
+	private static Key<?> findLegacyUndoKey() {
+		try {
+			Class<?> undoConstants = Class.forName("com.intellij.openapi.command.undo.UndoConstants");
+			Object value = undoConstants.getField("DONT_RECORD_UNDO").get(null);
+			return value instanceof Key ? (Key<?>) value : null;
+		} catch (Throwable t) {
+			return null;
 		}
 	}
 }
