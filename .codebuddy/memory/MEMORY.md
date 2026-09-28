@@ -160,10 +160,15 @@
   目的是消除二进制依赖（硬引用时平台改名/删除会让 `getPolicy()` 抛 `NoSuchFieldError`，编辑器直接不可用），
   不是为了藏警告。**别改回 suppressor、也别用 `isBinary()=true`**（后者会让 .datachart 变二进制：丢文本 diff / 搜不到文件）。
   五个方案的对比 + 分支谓词依据见 DEVELOPMENT_GUIDE 第 53.2 节。
-- **调用平台动作不要碰 `AnAction.update()/actionPerformed()`**（都是 `@ApiStatus.OverrideOnly`，verifier 报 override-only）：
-  判可用性用 `ActionUtil.lastUpdateAndCheckDumb(action, event, false)` + 读 `event.getPresentation().isEnabled()`；
-  执行用 `ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null)`。
-  这两条取代了 09-23 那条"保留调用 + `//noinspection OverrideOnly`"的做法（见 DEVELOPMENT_GUIDE 第 53.3 节）。
+- **调用平台动作不要碰 `AnAction.update()/actionPerformed()`**（都是 `@ApiStatus.OverrideOnly`，verifier 报 override-only）。
+  2026-09-28 按 verifier 报告迭代出的**最终三件套**（`TableNavigator.performDatabaseAction`）：
+  造事件用**反射自适应**（`createActionEvent`：先试 `createFromAnAction`，再退 `createFromDataContext`）；
+  判可用 `ActionUtil.lastUpdateAndCheckDumb(action, event, false)` + 读 `presentation.isEnabled()`；
+  执行 `ActionUtil.performActionDumbAwareWithCallbacks(action, event)`。
+  ⚠️ 硬引用过的坑（都被平台后续版本标记）：`AnActionEvent.createFromDataContext` 与 `createFromAnAction`
+  （243 均报 scheduled for removal）、`ActionUtil.invokeAction`（243 报 deprecated）。
+  **规律**：某 API 家族在多个版本被"逐个标记"时，别再挑最新的硬引用（打地鼠），一律改反射自适应 + 降级。
+  见 DEVELOPMENT_GUIDE 第 53.3 节。
 - **内部页签贴底部**（用户要求）：`tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom)`
   —— 默认 top 会与 IDE 自己的 Tab 栏叠在一起。⚠️ `setTabsPosition` 在 `JBTabsPresentation` 上（不是 `JBTabs`）；
   `JBTabsPosition` 枚举常量是**小写** `top/left/bottom/right`；平台只有四边、无"靠右"选项，底部时页签自左侧排列。

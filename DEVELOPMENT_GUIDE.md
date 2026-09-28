@@ -2122,15 +2122,47 @@ Override-only method usage violations (2)
 此前（第 49 节）判断"平台没有无副作用的等价入口"因而保留调用 + 行级抑制 —— 现在必须换掉。
 查 `ActionUtil` 的 javap 注解后改用两个**公开**入口：
 
-| 用途 | 原写法 | 现在 |
-| --- | --- | --- |
-| 刷新状态 / 判可用 | `action.update(event)` | `ActionUtil.lastUpdateAndCheckDumb(action, event, false)`，再读 `event.getPresentation().isEnabled()` |
-| 执行 | `action.actionPerformed(event)` | `ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null)`（平台内部会再跑一次 update + actionPerformed） |
+**第二轮（2024.3.7 报告）**：上一轮换完，243 又报了两条 —— 而这两条**恰好都是上一轮刚引入的**：
+`AnActionEvent.createFromDataContext(...)`（scheduled for removal）与 `ActionUtil.invokeAction(...)`（deprecated）。
+最终写法（三轮对比）：
 
-- `lastUpdateAndCheckDumb` 内部会 `commitDocumentsIfNeeded()` —— 平台执行动作前的常规步骤，可接受；
-- 它抛异常时**不当作"不可用"**，而是跳过判断直接尝试执行（版本 / 线程差异不该让功能失灵）；
-- `doPerformActionOrShowPopup` 是 `@ApiStatus.Internal`，**不要**用它替代。
-- 重新扫字节码确认：全项目已无 `AnAction.update / actionPerformed / beforeActionPerformedUpdate` 的直接调用。
+| 用途 | 最初 | 中间（修完 2024.1 报告） | **最终（修完 2024.3 报告）** |
+| --- | --- | --- | --- |
+| 造事件 | `AnActionEvent.createFromDataContext(place, presentation, dataContext)` | 同左 → 243 报 "scheduled for removal" | `AnActionEvent.createFromAnAction(action, null, ActionPlaces.POPUP, dataContext)` |
+| 刷新状态 / 判可用 | `action.update(event)`（override-only） | `ActionUtil.lastUpdateAndCheckDumb(action, event, false)` + 读 `isEnabled()` | 同左（243 未报，保留） |
+| 执行 | `action.actionPerformed(event)`（override-only） | `ActionUtil.invokeAction(action, dataContext, place, null, null)` → 243 报 deprecated | `ActionUtil.performActionDumbAwareWithCallbacks(action, event)` |
+
+- **为什么 `performActionDumbAwareWithCallbacks` 等价于 `invokeAction`**：javap 看它的实现就是
+  `event.getActionManager().performWithActionCallbacks(action, event, () -> action.actionPerformed(event))` ——
+  由**平台**去触发 `actionPerformed`，我们仍然不碰 override-only 方法，但不再依赖 deprecated 的入口；
+- `lastUpdateAndCheckDumb` 内部会 `commitDocumentsIfNeeded()`（平台执行动作前的常规步骤，可接受）；
+- 检查抛异常时**不当作"不可用"**，而是跳过判断直接尝试执行（版本 / 线程差异不该让功能失灵）；
+- `doPerformActionOrShowPopup` 是 `@ApiStatus.Internal`，**不要**用它替代；
+- 字节码自查（模拟 verifier 判定）：`createFromDataContext` / `ActionUtil.invokeAction` /
+  `AnAction.update|actionPerformed` 的直接调用数**全部为 0**。
+**第三轮（2024.3.7 报告，同一天）**：上次换上的 `AnActionEvent.createFromAnAction(...)` **也被 243 标成 scheduled for removal**
+—— 说明平台在**整体清理"从 DataContext 造事件"这一族老工厂**，一个个换只会追不完。
+最终做法：把这一族**整体改成反射自适应**（`TableNavigator.createActionEvent`）：
+
+| 顺序 | 候选工厂 | 备注 |
+| --- | --- | --- |
+| 1 | `AnActionEvent.createFromAnAction(action, null, place, dataContext)` | 带 action，最贴合；`InputEvent` 传 `null` 也安全（平台内部按 `modifiers = 0` 处理） |
+| 2 | `AnActionEvent.createFromDataContext(place, presentation, dataContext)` | 最老的一版，兜底 |
+
+- 两个都用 `Class.getMethod(...)` 找 → **字节码里没有任何 `AnActionEvent.createFrom*` 引用**，
+  于是无论哪个版本标记谁、移除谁，verifier 都不会再提；
+- 两个都取不到时返回 `null` → 调用方给"跳转失败"提示（`Result.fail`），不抛异常；
+- 反射可用性已在本地 241 平台 jar 上**实测**：两个 `getMethod` 都成功；
+- 判可用 / 执行仍是**直接调用**（243 未标记它们）：`ActionUtil.lastUpdateAndCheckDumb(...)` +
+  `ActionUtil.performActionDumbAwareWithCallbacks(...)`；
+- 字节码自查：`AnActionEvent.createFrom*` = 0、`ActionUtil.invokeAction` = 0、
+  `AnAction.update|actionPerformed` = 0。
+
+> **规律（今天重复踩了三次）**：当某个 API 家族在多个版本里被"逐个标记"时，
+> **别再挑"看起来最新"的那个去硬引用** —— 那是打地鼠。
+> 正确做法是改成反射自适应（按顺序尝试 + 取不到就降级），一次性跳出这个循环。
+> 今天按这个思路处理了：`UndoConstants`(53.1)、`FileEditorProviderSuppressor`(53.2)、
+> `HIDE_OTHER_EDITORS`(53.2 表)、`FileDocumentManagerListener.TOPIC`(53.5)、`AnActionEvent` 工厂族（本节）。
 
 #### 53.4 对照：2024.1.7（IU-241.19416.15）报告逐项结果
 

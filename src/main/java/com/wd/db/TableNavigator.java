@@ -7,6 +7,7 @@ import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.actionSystem.CommonDataKeys;
 import com.intellij.openapi.actionSystem.DataContext;
 import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
+import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
 import com.intellij.openapi.application.ReadAction;
@@ -18,7 +19,10 @@ import com.intellij.usages.UsageTarget;
 import com.intellij.usages.UsageView;
 import com.wd.i18n.DataChartBundle;
 import java.awt.Component;
+import java.awt.event.InputEvent;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -220,16 +224,23 @@ public final class TableNavigator {
 		}
 		DataContext dataContext = builder.build();
 
-		AnActionEvent event = AnActionEvent.createFromDataContext(
-				ActionPlaces.POPUP, action.getTemplatePresentation().clone(), dataContext);
-
-		// 2026-09-28：不再直接调 AnAction.update() / actionPerformed() ——
-		// 两者都标了 @ApiStatus.OverrideOnly（"只由平台调用 / 只由动作自己覆写"），
-		// Plugin Verifier 会报 "override-only API usage violation"。改用平台公开入口：
-		//   ① ActionUtil.lastUpdateAndCheckDumb(...)：让平台刷新 presentation
-		//      （内部处理 dumb 模式与 ActionUpdateThread 的线程要求），之后读 isEnabled() 判断可用性；
-		//      ⚠️ 它内部会先 commitDocumentsIfNeeded() —— 平台执行动作前的常规步骤，可接受；
-		//   ② ActionUtil.invokeAction(...)：真正执行（平台内部会再跑一次 update + actionPerformed）。
+		// 2026-09-28 第三轮：不再直接调 AnAction.update() / actionPerformed()（@ApiStatus.OverrideOnly，
+		// verifier 报 "override-only API usage violation"），也不直接引用 AnActionEvent 的任何"造事件"工厂
+		//（那一族在 2024.3 被逐个标记：createFromDataContext、createFromAnAction 都进了
+		//  "scheduled for removal"，硬引用一个换一个只会一直追）。现在的三段式：
+		//   ① 造事件：createActionEvent(...) —— 反射自适应（见方法注释）；
+		//   ② 判可用：ActionUtil.lastUpdateAndCheckDumb(...) 刷新 presentation 后读 isEnabled()
+		//      （内部处理 dumb 模式与 ActionUpdateThread 线程要求；⚠️ 它会先 commitDocumentsIfNeeded()，
+		//        这是平台执行动作前的常规步骤，可接受）；
+		//   ③ 执行：ActionUtil.performActionDumbAwareWithCallbacks(...)
+		//      （⚠️ 不用 ActionUtil.invokeAction：它自 2024.3 起被标记 @Deprecated；
+		//        两者内层都是 performWithActionCallbacks(action, event, () -> action.actionPerformed(event))，
+		//        由平台触发 actionPerformed，我们依旧不碰 override-only 方法）。
+		AnActionEvent event = createActionEvent(action, dataContext);
+		if (event == null) {
+			LOG.warn("无法构造 AnActionEvent，跳转动作无法执行: " + actionId);
+			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
+		}
 		boolean enabled = true;
 		try {
 			ActionUtil.lastUpdateAndCheckDumb(action, event, false);
@@ -243,12 +254,68 @@ public final class TableNavigator {
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.disabled", actionId));
 		}
 		try {
-			ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null);
+			ActionUtil.performActionDumbAwareWithCallbacks(action, event);
 		} catch (Exception e) {
 			LOG.warn("跳转动作执行异常: " + actionId, e);
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
 		}
 		return Result.ok();
+	}
+
+	// ========== AnActionEvent 工厂（反射自适应） ==========
+
+	/** 反射：{@code AnActionEvent.createFromAnAction(AnAction, InputEvent, String, DataContext)}。 */
+	@Nullable
+	private static final Method EVENT_FROM_ACTION = findStaticMethod(AnActionEvent.class,
+			"createFromAnAction", AnAction.class, InputEvent.class, String.class, DataContext.class);
+
+	/** 反射：{@code AnActionEvent.createFromDataContext(String, Presentation, DataContext)}（最老的一版，兜底）。 */
+	@Nullable
+	private static final Method EVENT_FROM_DATA_CONTEXT = findStaticMethod(AnActionEvent.class,
+			"createFromDataContext", String.class, Presentation.class, DataContext.class);
+
+	/**
+	 * 造一个用于"试探可用性 / 执行"的 {@link AnActionEvent}。
+	 *
+	 * <p><b>为什么这一族全走反射</b>：平台正在清理"从 {@link DataContext} 造事件"这套老工厂 ——
+	 * 2024.3 的 Plugin Verifier 先后把 {@code createFromDataContext}、{@code createFromAnAction}
+	 * 都报成 "scheduled for removal"。硬引用任何一个都会持续吃警告，
+	 * 且平台真正移除时会变成 {@code NoSuchMethodError}；反射则"存在即用、不存在退到下一个"，
+	 * 字节码里也不会出现这一族的任何引用。</p>
+	 *
+	 * <p>顺序：{@code createFromAnAction}（带 action，最贴合我们的场景）→
+	 * {@code createFromDataContext}（最老的一版，兜底）。
+	 * 两者都接受 {@code null} 的 {@code InputEvent}（平台内部按 {@code modifiers = 0} 处理），
+	 * 我们这里本来就没有真实输入事件（菜单项点击被 JPopupMenu 消费掉了）。</p>
+	 *
+	 * @return 事件；两个工厂都不可用时返回 {@code null}（调用方给出失败提示，不抛异常）
+	 */
+	@Nullable
+	private static AnActionEvent createActionEvent(@NotNull AnAction action, @NotNull DataContext dataContext) {
+		try {
+			if (EVENT_FROM_ACTION != null) {
+				return (AnActionEvent) EVENT_FROM_ACTION.invoke(
+						null, action, null, ActionPlaces.POPUP, dataContext);
+			}
+			if (EVENT_FROM_DATA_CONTEXT != null) {
+				return (AnActionEvent) EVENT_FROM_DATA_CONTEXT.invoke(
+						null, ActionPlaces.POPUP, action.getTemplatePresentation().clone(), dataContext);
+			}
+		} catch (Exception e) {
+			LOG.warn("构造 AnActionEvent 失败", e);
+		}
+		return null;
+	}
+
+	/** 反射取公开静态方法；方法不存在或签名不符时返回 {@code null}（调用方据此降级）。 */
+	@Nullable
+	private static Method findStaticMethod(Class<?> owner, String name, Class<?>... parameterTypes) {
+		try {
+			Method method = owner.getMethod(name, parameterTypes);
+			return Modifier.isStatic(method.getModifiers()) ? method : null;
+		} catch (Throwable t) {
+			return null;
+		}
 	}
 
 	/**
