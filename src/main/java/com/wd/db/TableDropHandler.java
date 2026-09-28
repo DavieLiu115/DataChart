@@ -4,10 +4,10 @@ import com.intellij.ide.dnd.DnDEvent;
 import com.intellij.ide.dnd.DnDManager;
 import com.intellij.ide.dnd.DnDTarget;
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.wd.i18n.DataChartBundle;
+import com.wd.util.ReadActions;
 import java.awt.Point;
 import java.awt.datatransfer.DataFlavor;
 import javax.swing.JComponent;
@@ -186,7 +186,7 @@ public class TableDropHandler implements DnDTarget {
 				TableInfo info;
 				try {
 					// PSI/DAS 对象访问必须在 ReadAction 中
-					info = ReadAction.compute(() -> {
+					info = ReadActions.compute(() -> {
 						if (fetcher instanceof DatabaseTableMetadataFetcher) {
 							// 直接基于拖拽对象查询元信息（比名字匹配更可靠）
 							return ((DatabaseTableMetadataFetcher) fetcher)

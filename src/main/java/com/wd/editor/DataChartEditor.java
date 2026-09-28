@@ -1,7 +1,6 @@
 package com.wd.editor;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -23,6 +22,7 @@ import com.wd.i18n.DataChartLanguage;
 import com.wd.model.ChartJsonUtil;
 import com.wd.ui.DataChartView;
 import com.wd.ui.NotificationUtil;
+import com.wd.util.ReadActions;
 import java.awt.BorderLayout;
 import java.beans.PropertyChangeListener;
 import java.beans.PropertyChangeSupport;
@@ -200,7 +200,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		ApplicationManager.getApplication().executeOnPooledThread(() -> {
 			String content = null;
 			try {
-				content = ReadAction.compute(() -> {
+				content = ReadActions.compute(() -> {
 					try {
 						return new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
 					} catch (Exception ex) {
@@ -435,7 +435,7 @@ public class DataChartEditor extends UserDataHolderBase implements FileEditor {
 		if (modified) {
 			boolean changedExternally = false;
 			try {
-				long currentStamp = ReadAction.compute(file::getModificationStamp);
+				long currentStamp = ReadActions.compute(file::getModificationStamp);
 				changedExternally = lastSavedStamp >= 0 && currentStamp != lastSavedStamp;
 			} catch (Exception e) {
 				LOG.warn("dispose 时读取文件修改戳失败", e);

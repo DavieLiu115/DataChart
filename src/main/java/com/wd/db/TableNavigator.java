@@ -10,7 +10,6 @@ import com.intellij.openapi.actionSystem.PlatformCoreDataKeys;
 import com.intellij.openapi.actionSystem.Presentation;
 import com.intellij.openapi.actionSystem.ex.ActionUtil;
 import com.intellij.openapi.actionSystem.impl.SimpleDataContext;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.find.findUsages.PsiElement2UsageTargetAdapter;
@@ -18,6 +17,7 @@ import com.intellij.psi.PsiElement;
 import com.intellij.usages.UsageTarget;
 import com.intellij.usages.UsageView;
 import com.wd.i18n.DataChartBundle;
+import com.wd.util.ReadActions;
 import java.awt.Component;
 import java.awt.event.InputEvent;
 import java.lang.reflect.Method;
@@ -126,18 +126,9 @@ public final class TableNavigator {
 	 * <p>必须在 EDT 调用（由右键菜单触发）。内部会先做 PSI 解析与可用性判断，
 	 * 失败时返回带原因的 {@link Result}，由调用方提示用户。</p>
 	 *
-	 * @param project  当前工程
-	 * @param info     表元信息（提供数据源名与表名，用于现场解析 PSI 元素）
-	 * @param actionId 动作 id，取值见本类常量
-	 */
-	public static Result performAction(@Nullable Project project,
-			@Nullable TableInfo info, @Nullable String actionId) {
-		return performAction(project, info, actionId, null);
-	}
-
-	/**
-	 * 对指定表执行跳转（带父组件，用于弹窗 / 对话框定位）。
-	 *
+	 * @param project          当前工程
+	 * @param info             表元信息（提供数据源名与表名，用于现场解析 PSI 元素）
+	 * @param actionId         动作 id，取值见本类常量
 	 * @param contextComponent 作为 {@code PlatformCoreDataKeys.CONTEXT_COMPONENT} 注入，
 	 *                         让 {@code FindUsages} 之类的弹窗能相对该组件定位；可为 null
 	 */
@@ -213,7 +204,7 @@ public final class TableNavigator {
 			// 这里补一个 UsageTarget，让动作走「单目标」分支直接查找（等价 Alt+F7）。
 			try {
 				// 注意：单参构造器在 2024.1 已 @Deprecated(forRemoval=true)，用 (element, update=true) 等价替代
-				UsageTarget[] usageTargets = ReadAction.compute(() ->
+				UsageTarget[] usageTargets = ReadActions.compute(() ->
 						new UsageTarget[]{new PsiElement2UsageTargetAdapter(element, true)});
 				builder.add(UsageView.USAGE_TARGETS_KEY, usageTargets);
 			} catch (Exception e) {
@@ -224,43 +215,73 @@ public final class TableNavigator {
 		}
 		DataContext dataContext = builder.build();
 
-		// 2026-09-28 第三轮：不再直接调 AnAction.update() / actionPerformed()（@ApiStatus.OverrideOnly，
+		// 2026-09-28：不再直接调 AnAction.update() / actionPerformed()（@ApiStatus.OverrideOnly，
 		// verifier 报 "override-only API usage violation"），也不直接引用 AnActionEvent 的任何"造事件"工厂
 		//（那一族在 2024.3 被逐个标记：createFromDataContext、createFromAnAction 都进了
-		//  "scheduled for removal"，硬引用一个换一个只会一直追）。现在的三段式：
-		//   ① 造事件：createActionEvent(...) —— 反射自适应（见方法注释）；
+		//  "scheduled for removal"，硬引用一个换一个只会一直追）。现在的三段式，三段<b>全部</b>走反射：
+		//   ① 造事件：createActionEvent(...)   —— 2024.3 起该族被逐个标记；
 		//   ② 判可用：ActionUtil.lastUpdateAndCheckDumb(...) 刷新 presentation 后读 isEnabled()
 		//      （内部处理 dumb 模式与 ActionUpdateThread 线程要求；⚠️ 它会先 commitDocumentsIfNeeded()，
-		//        这是平台执行动作前的常规步骤，可接受）；
-		//   ③ 执行：ActionUtil.performActionDumbAwareWithCallbacks(...)
-		//      （⚠️ 不用 ActionUtil.invokeAction：它自 2024.3 起被标记 @Deprecated；
-		//        两者内层都是 performWithActionCallbacks(action, event, () -> action.actionPerformed(event))，
-		//        由平台触发 actionPerformed，我们依旧不碰 override-only 方法）。
+		//        这是平台执行动作前的常规步骤，可接受）—— 2026.3 起被标记 @Deprecated；
+		//   ③ 执行：ActionUtil.performActionDumbAwareWithCallbacks(...) —— 2026.3 起被标记 @Deprecated；
+		//        取不到时退到更老的 ActionUtil.invokeAction(...)（2024.3 起已被标记）。
+		// 三者都反射 + 逐级降级：字节码里没有它们的硬引用 → verifier 任何版本都不会再报，
+		// 平台真删掉某个方法时也只是降级（跳过检查 / 换执行入口），不会 NoSuchMethodError。
 		AnActionEvent event = createActionEvent(action, dataContext);
 		if (event == null) {
 			LOG.warn("无法构造 AnActionEvent，跳转动作无法执行: " + actionId);
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
 		}
 		boolean enabled = true;
-		try {
-			ActionUtil.lastUpdateAndCheckDumb(action, event, false);
-			enabled = event.getPresentation().isEnabled();
-		} catch (Exception e) {
-			// 版本 / 线程差异导致的异常不该影响功能：跳过可用性判断，直接尝试执行
-			LOG.warn("跳转动作 update 检查失败，改为直接尝试执行: " + actionId, e);
+		if (LAST_UPDATE_AND_CHECK_DUMB == null) {
+			LOG.warn("平台已无 ActionUtil.lastUpdateAndCheckDumb，跳过可用性检查: " + actionId);
+		} else {
+			try {
+				LAST_UPDATE_AND_CHECK_DUMB.invoke(null, action, event, false);
+				enabled = event.getPresentation().isEnabled();
+			} catch (Exception e) {
+				// 版本 / 线程差异导致的异常不该影响功能：跳过可用性判断，直接尝试执行
+				LOG.warn("跳转动作 update 检查失败，改为直接尝试执行: " + actionId, e);
+			}
 		}
 		if (!enabled) {
 			LOG.warn("跳转动作在当前上下文被置灰: " + actionId + ", place=" + ActionPlaces.POPUP);
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.disabled", actionId));
 		}
 		try {
-			ActionUtil.performActionDumbAwareWithCallbacks(action, event);
+			if (PERFORM_ACTION != null) {
+				PERFORM_ACTION.invoke(null, action, event);
+				return Result.ok();
+			}
+			if (INVOKE_ACTION != null) {
+				// 兜底：更老的入口，内部同样由平台触发 actionPerformed
+				INVOKE_ACTION.invoke(null, action, dataContext, ActionPlaces.POPUP, null, null);
+				return Result.ok();
+			}
 		} catch (Exception e) {
 			LOG.warn("跳转动作执行异常: " + actionId, e);
 			return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
 		}
-		return Result.ok();
+		LOG.warn("平台未提供可用的动作执行入口（performActionDumbAwareWithCallbacks / invokeAction 均缺失）: " + actionId);
+		return Result.fail(DataChartBundle.message("DataChart.navigate.action.failed", actionId));
 	}
+
+	// ========== 动作执行入口（反射自适应，见 performDatabaseAction 的注释） ==========
+
+	/** 反射：{@code ActionUtil.lastUpdateAndCheckDumb(AnAction, AnActionEvent, boolean)}（2026.3 起 @Deprecated）。 */
+	@Nullable
+	private static final Method LAST_UPDATE_AND_CHECK_DUMB = findStaticMethod(ActionUtil.class,
+			"lastUpdateAndCheckDumb", AnAction.class, AnActionEvent.class, boolean.class);
+
+	/** 反射：{@code ActionUtil.performActionDumbAwareWithCallbacks(AnAction, AnActionEvent)}（2026.3 起 @Deprecated）。 */
+	@Nullable
+	private static final Method PERFORM_ACTION = findStaticMethod(ActionUtil.class,
+			"performActionDumbAwareWithCallbacks", AnAction.class, AnActionEvent.class);
+
+	/** 反射兜底：{@code ActionUtil.invokeAction(AnAction, DataContext, String, InputEvent, Runnable)}（2024.3 起 @Deprecated）。 */
+	@Nullable
+	private static final Method INVOKE_ACTION = findStaticMethod(ActionUtil.class,
+			"invokeAction", AnAction.class, DataContext.class, String.class, InputEvent.class, Runnable.class);
 
 	// ========== AnActionEvent 工厂（反射自适应） ==========
 
@@ -325,7 +346,7 @@ public final class TableNavigator {
 	private static PsiElement resolvePsiElement(Project project, TableInfo info) {
 		Object element;
 		try {
-			element = ReadAction.compute(() -> {
+			element = ReadActions.compute(() -> {
 				TableMetadataFetcher fetcher = TableMetadataService.getInstance(project).getFetcher();
 				if (fetcher instanceof DatabaseTableMetadataFetcher) {
 					return ((DatabaseTableMetadataFetcher) fetcher)

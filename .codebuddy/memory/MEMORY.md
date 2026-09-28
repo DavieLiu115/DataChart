@@ -161,14 +161,18 @@
   不是为了藏警告。**别改回 suppressor、也别用 `isBinary()=true`**（后者会让 .datachart 变二进制：丢文本 diff / 搜不到文件）。
   五个方案的对比 + 分支谓词依据见 DEVELOPMENT_GUIDE 第 53.2 节。
 - **调用平台动作不要碰 `AnAction.update()/actionPerformed()`**（都是 `@ApiStatus.OverrideOnly`，verifier 报 override-only）。
-  2026-09-28 按 verifier 报告迭代出的**最终三件套**（`TableNavigator.performDatabaseAction`）：
-  造事件用**反射自适应**（`createActionEvent`：先试 `createFromAnAction`，再退 `createFromDataContext`）；
-  判可用 `ActionUtil.lastUpdateAndCheckDumb(action, event, false)` + 读 `presentation.isEnabled()`；
-  执行 `ActionUtil.performActionDumbAwareWithCallbacks(action, event)`。
-  ⚠️ 硬引用过的坑（都被平台后续版本标记）：`AnActionEvent.createFromDataContext` 与 `createFromAnAction`
-  （243 均报 scheduled for removal）、`ActionUtil.invokeAction`（243 报 deprecated）。
-  **规律**：某 API 家族在多个版本被"逐个标记"时，别再挑最新的硬引用（打地鼠），一律改反射自适应 + 降级。
-  见 DEVELOPMENT_GUIDE 第 53.3 节。
+  2026-09-28 按 verifier 报告迭代出的**最终三件套**（`TableNavigator.performDatabaseAction`），**三段全部反射 + 降级**：
+  造事件 `createActionEvent`（`createFromAnAction` → `createFromDataContext`）；
+  判可用 `ActionUtil.lastUpdateAndCheckDumb`（反射，取不到就跳过检查）；
+  执行 `ActionUtil.performActionDumbAwareWithCallbacks` → 退 `ActionUtil.invokeAction`（都反射）。
+  ⚠️ 硬引用过的坑（逐个被平台标记）：两个 `AnActionEvent.createFrom*`（243 scheduled for removal）、
+  `ActionUtil.invokeAction`（243 deprecated）、`lastUpdateAndCheckDumb`/`performActionDumbAwareWithCallbacks`（263 deprecated）。
+  **规律**：某 API 家族被"逐个标记"时别再挑最新的硬引用（打地鼠），一律反射自适应 + 降级。见 DEVELOPMENT_GUIDE 53.3。
+- **`ReadAction.compute` 已废弃**（263 报 8 处）→ 统一走 `com.wd.util.ReadActions.compute(...)`：
+  内部反射按 `ReadAction.computeBlocking`（新，未废弃）→ `compute`（旧）→ `Application.runReadAction`（兜底）挑，
+  因为 `computeBlocking` 是 2024.2+ 新加的、老版本（223~241）只有 `compute`，硬引用任何一个都会出问题。
+  ⚠️ 反射调用必须拆 `InvocationTargetException` 原样抛出（`throw (E) e.getCause()`），否则调用方 catch/日志失真。
+  替代名来源：官方"API changes"清单**不收**普通 `@Deprecated`，要去平台主干源码 `platform/core-api/.../ReadAction.java` 查。见 §53.6。
 - **内部页签贴底部**（用户要求）：`tabs.getPresentation().setTabsPosition(JBTabsPosition.bottom)`
   —— 默认 top 会与 IDE 自己的 Tab 栏叠在一起。⚠️ `setTabsPosition` 在 `JBTabsPresentation` 上（不是 `JBTabs`）；
   `JBTabsPosition` 枚举常量是**小写** `top/left/bottom/right`；平台只有四边、无"靠右"选项，底部时页签自左侧排列。

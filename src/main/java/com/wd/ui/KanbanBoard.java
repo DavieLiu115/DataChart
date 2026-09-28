@@ -1,7 +1,6 @@
 package com.wd.ui;
 
 import com.intellij.openapi.application.ApplicationManager;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
 import com.intellij.ui.Gray;
@@ -12,6 +11,7 @@ import com.wd.i18n.DataChartBundle;
 import com.wd.model.ChartData;
 import com.wd.model.ChartRelation;
 import com.wd.model.RelationType;
+import com.wd.util.ReadActions;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -1857,7 +1857,7 @@ public class KanbanBoard extends JPanel {
 		ApplicationManager.getApplication().executeOnPooledThread(() -> {
 			final TableInfo fresh;
 			try {
-				fresh = ReadAction.compute(() ->
+				fresh = ReadActions.compute(() ->
 						svc.getFetcher().fetchTableInfo(project, dsName, tableName));
 			} catch (Exception e) {
 				LOG.warn("后台同步表结构查询失败: " + tableName, e);

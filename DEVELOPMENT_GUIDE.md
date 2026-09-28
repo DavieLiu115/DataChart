@@ -2215,10 +2215,59 @@ if (SAVE_ALL_TOPIC == null) { LOG.info("...跳过 SaveAll 钩子"); return; }
 > 只要插件的支持范围跨过了平台 API 的变更点，**新增/删除的字段都不能硬引用** ——
 > 要么换成跨版本都有的 API，要么反射 + 降级。
 
-#### 53.6 尚未定位：8 个 deprecated + 1 个 scheduled for removal
+#### 53.6 IU-263 的 10 处 deprecated API（2026-09-28 已定位并全部解除）
 
-这两类是相对 **IU-263** 的警告，本地 241 编译**没有任何 deprecation 输出**，所以列不出来。
-需要把 verifier 报告里这两节展开（或提供 HTML/JSON 报告）才能逐个替换。
+2026.3 EAP（IU-263.5701.42）报告展开后是 3 个成员共 10 处：
+
+| 数量 | 被标 deprecated 的成员 | 平台给的替代 |
+| --- | --- | --- |
+| 8 | `ReadAction.compute(ThrowableComputable)` | `ReadAction.computeBlocking(ThrowableComputable)` |
+| 1 | `ActionUtil.lastUpdateAndCheckDumb(...)` | 未公开（263 才标，官方改动清单不收普通 `@Deprecated`） |
+| 1 | `ActionUtil.performActionDumbAwareWithCallbacks(...)` | 同上 |
+
+**替代名称从哪来**：官方"API changes"清单只收 `@Deprecated(forRemoval)` / `@ApiStatus.ScheduledForRemoval`，
+普通 `@Deprecated` 不收录，所以这类警告要靠**平台主干源码**确认。`ReadAction` 的答案在
+`platform/core-api/.../ReadAction.java`（master）：
+
+```java
+@Deprecated  // "use ReadAction#nonBlocking(Callable) or #computeBlocking(ThrowableComputable)"
+public static <T, E extends Throwable> T compute(@NotNull ThrowableComputable<T, E> action) throws E {
+    return computeBlocking(action);      // ← 内部就是转发，替代品一目了然
+}
+public static <T, E extends Throwable> T computeBlocking(@NotNull ThrowableComputable<T, E> action) throws E { ... }  // 未废弃
+```
+
+> 同类先例（官方 2025.* 清单里有明确记录）：`WriteIntentReadAction.compute(ThrowableComputable)` 被移除 →
+> 改用 `WriteIntentReadAction.computeThrowable(...)`。平台这一轮是在给"阻塞式读操作"统一改名。
+
+**难点：新名字在老版本里不存在**。`computeBlocking` 是本机 2024.3 的 `ReadAction` 里**没有**的
+（用 `javap` 核对过：只有 `run/compute/nonBlocking/computeCancellable`），而我们要兼容 223 ~ 263+，
+`compute` 在老版本里又是唯一入口 —— **直接引用哪一个都会有问题**（新的在老版本 `NoSuchMethodError`，
+旧的继续吃 deprecated 警告）。
+
+**解法（本仓库统一模式：反射自适应 + 逐级降级）**：
+
+| 位置 | 做法 |
+| --- | --- |
+| 新增 `com.wd.util.ReadActions` | 8 处 `ReadAction.compute(...)` 统一换成 `ReadActions.compute(...)`；内部反射按 `computeBlocking` → `compute` → `Application.runReadAction` 顺序挑，三个都没有才直接执行（打日志） |
+| `TableNavigator.performDatabaseAction` | `lastUpdateAndCheckDumb` / `performActionDumbAwareWithCallbacks` 也改反射；取不到时**降级**（跳过可用性检查 / 退到更老的 `invokeAction`） |
+
+关键点：
+1. **反射要拆包异常**：`Method.invoke` 会把读操作体的异常包成 `InvocationTargetException`，
+   `ReadActions.invoke` 里 `throw (E) e.getCause()` 原样抛回 —— 否则调用方的 `catch` 和日志都会失真。
+2. **`ActionUtil` 的执行入口要有兜底链**：`performActionDumbAwareWithCallbacks`（263 deprecated）
+   → `invokeAction`（243 deprecated）→ 都没有才 `Result.fail` 提示；
+   每一级都是反射，平台真删掉某个方法时只是降级，不会 `NoSuchMethodError`。
+3. **副作用正是目的**：字节码里没有这些成员的硬引用 → verifier 任何版本都不会再报
+   （实测：全项目 class 扫描 `ReadAction.compute:` / `ActionUtil.*:` / `AnActionEvent.createFrom*` 命中数 = 0）。
+4. **本地验证降级链**：本机 2024.3 的 jar 上 `computeBlocking` 反射确实取不到 → 自动落到 `compute`；
+   `runReadAction` 与三个 `ActionUtil` 方法都能取到（即 241 / 263 两端都能跑）。
+
+#### 53.7 尚未确认：还有什么坑（下次别重走）
+- `AnActionEvent` 系工厂（`createFromDataContext` / `createFromAnAction`）在多版本被逐个标记 →
+  已取消硬引用，见 53.3；再遇到同类"家族逐个废弃"的 API，**一律反射自适应**，别再挑最新的硬引用。
+- `Application.runReadAction` 是否也在 263 被标 deprecated 未能确认（verifier 只报我们**用过**的成员）；
+  它现在只是反射兜底路径，即使被标也不会进报告。
 
 #### 验证（不用等 CI）
 ```bash

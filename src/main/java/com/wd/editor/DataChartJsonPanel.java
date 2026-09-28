@@ -2,7 +2,6 @@ package com.wd.editor;
 
 import com.intellij.json.JsonFileType;
 import com.intellij.openapi.Disposable;
-import com.intellij.openapi.application.ReadAction;
 import com.intellij.openapi.command.WriteCommandAction;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.editor.Document;
@@ -22,6 +21,7 @@ import com.intellij.psi.PsiManager;
 import com.intellij.testFramework.LightVirtualFile;
 import com.intellij.ui.EditorCustomization;
 import com.intellij.ui.ErrorStripeEditorCustomization;
+import com.wd.util.ReadActions;
 import java.awt.BorderLayout;
 import java.nio.charset.StandardCharsets;
 import javax.swing.JComponent;
@@ -213,7 +213,7 @@ public class DataChartJsonPanel implements Disposable {
 	 * PSI 建立失败时退回普通文档（高亮仍在，只是少了依赖 PSI 的功能）。
 	 */
 	private Document createJsonDocument(String text) {
-		return ReadAction.compute(() -> {
+		return ReadActions.compute(() -> {
 			try {
 				PsiFile psiFile = PsiManager.getInstance(project).findFile(lightFile);
 				if (psiFile != null) {
@@ -254,7 +254,7 @@ public class DataChartJsonPanel implements Disposable {
 
 	private String readFileText() {
 		try {
-			return ReadAction.compute(() -> {
+			return ReadActions.compute(() -> {
 				try {
 					return new String(file.contentsToByteArray(), StandardCharsets.UTF_8);
 				} catch (Exception e) {
