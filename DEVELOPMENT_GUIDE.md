@@ -2092,19 +2092,23 @@ if (hideOther)   providers.removeIf(postProcessResult$2);   // 谓词 = policy !
 > 教训：`HIDE_DEFAULT_EDITOR` 确实只管"默认编辑器"那一个 provider；
 > 但 `HIDE_OTHER_EDITORS` 是"排他"语义 —— 当初把两者混为一谈，才绕道去用了内部接口。
 
-**⚠️ 但换完还有个取舍要交代：`HIDE_OTHER_EDITORS` 在 241 里带 `@ApiStatus.Experimental`**
-（241.19416.15 的 verifier 报告会把上面两条 internal 换成一条 "experimental API usage: FileEditorPolicy.HIDE_OTHER_EDITORS"）。
-四个方案对比（用 `javap` 逐个确认过注解）：
+**⚠️ 这条 policy 本身也有讲究：`HIDE_OTHER_EDITORS` 在 232~242 都带 `@ApiStatus.Experimental`**
+（verifier 每个版本都会报一条 "experimental API usage: FileEditorPolicy.HIDE_OTHER_EDITORS"，263 已转正不再报）。
+五个方案对比（注解与分支谓词都用 `javap` 逐个核实过）：
 
-| 方案 | verifier | 代价 |
+| 方案 | verifier | 代价 / 风险 |
 | --- | --- | --- |
-| **`HIDE_OTHER_EDITORS`（现方案）** | 1 条 experimental（warning；241 报告总体结论仍是 **Compatible**） | 无功能代价；且 263 的报告里**已没有这一节** → 新版已转正，会自然消失 |
+| **反射取该常量（最终方案）** | **0**（没有 `getstatic` → 不构成"使用实验性 API"） | 常量若改名/删除 → 退化为 `NONE`（多一个 tab），**编辑器创建永不失败** |
+| 直接 `return FileEditorPolicy.HIDE_OTHER_EDITORS` | 1 条 experimental（232~242） | 真正的风险是**风险方向**：平台一旦改名/删除该常量，verifier 报"字段找不到"的兼容性问题，且 `getPolicy()` 在"创建编辑器"的必经链路上 → `NoSuchFieldError` 让**整个编辑器不可用** |
 | `FileEditorProviderSuppressor`（旧方案） | 2 条 internal（"不得在平台外使用"） | 平台内部实现，随时可能改签名 |
-| 什么都不做 | 0 | IDE 层多一个纯文本 "Text" tab（用户明确不喜欢，且易误判高亮失效） |
-| `FileType.isBinary() = true` | 0（纯公开 API） | 平台不再为它建文本编辑器，但 **`.datachart` 被当二进制** → 丢失文本 diff、Find in Path 搜不到；JSON 文件不能接受 |
+| 什么都不做 | 0 | IDE 层多一个纯文本 "Text" tab（用户明确不喜欢，且易误判成高亮失效） |
+| `FileType.isBinary() = true` | 0（纯公开 API） | 平台不再为它建文本编辑器，但 **`.datachart` 被当二进制** → 丢文本 diff、Find in Path 搜不到；JSON 文件不能接受（已查 `TextEditorProvider.accept`：只看 `isTextFile && !tooLarge`，没有别的可影响条件） |
 
-结论：**保留 `HIDE_OTHER_EDITORS`** —— experimental 是"可能变"，internal 是"不该用"，
-前者风险更低且已被平台转正；真出问题也只影响 tab 数量这一个外观行为。
+结论：**反射获取 `HIDE_OTHER_EDITORS`**（`DataChartEditorProvider.POLICY`，取不到退化为 `NONE`）。
+这不是为了"把警告藏起来"，而是**消除二进制依赖** —— experimental 常量的真实风险就是"将来被改名/删除"，
+反射 + 降级把这个风险从"编辑器整个不可用"降成"多一个 tab"。
+（反射可用性已在真实平台 jar 上实测：`FileEditorPolicy.class.getField("HIDE_OTHER_EDITORS").get(null)` → `HIDE_OTHER_EDITORS`。）
+同类做法见 53.1（`UndoConstants`）与 53.5（`FileDocumentManagerListener.TOPIC`）。
 
 #### 53.3 `AnAction.update() / actionPerformed()`（override-only）→ `ActionUtil` 公开入口
 

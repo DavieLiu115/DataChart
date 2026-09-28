@@ -155,9 +155,11 @@
   `FileEditorProviderSuppressor` 是 `@ApiStatus.Internal`，Plugin Verifier 会报 internal API usage（已删除实现与注册）。
   ⚠️ 旧结论"`HIDE_*` 都挡不住它"是错的 —— 那是把 `HIDE_DEFAULT_EDITOR`（只管默认编辑器）与
   `HIDE_OTHER_EDITORS`（排他）混为一谈；后者能移除平台文本编辑器。
-  ⚠️ 代价：`HIDE_OTHER_EDITORS` 在 **241 里带 `@ApiStatus.Experimental`**（verifier 报 1 条 experimental warning，
-  总体结论仍 Compatible）；263 的报告里已无该节 → 新版已转正。**别改回 suppressor、也别用 `isBinary()=true`**
-  （后者会让 .datachart 变二进制：丢文本 diff / 搜不到文件）。四个方案的对比见 DEVELOPMENT_GUIDE 第 53.2 节。
+  ⚠️ 代价：`HIDE_OTHER_EDITORS` 在 **232~242 里带 `@ApiStatus.Experimental`**（verifier 报 1 条 experimental warning；
+  263 已转正不报）→ **该常量改为反射获取**（`DataChartEditorProvider.POLICY`，取不到退化为 `FileEditorPolicy.NONE`）：
+  目的是消除二进制依赖（硬引用时平台改名/删除会让 `getPolicy()` 抛 `NoSuchFieldError`，编辑器直接不可用），
+  不是为了藏警告。**别改回 suppressor、也别用 `isBinary()=true`**（后者会让 .datachart 变二进制：丢文本 diff / 搜不到文件）。
+  五个方案的对比 + 分支谓词依据见 DEVELOPMENT_GUIDE 第 53.2 节。
 - **调用平台动作不要碰 `AnAction.update()/actionPerformed()`**（都是 `@ApiStatus.OverrideOnly`，verifier 报 override-only）：
   判可用性用 `ActionUtil.lastUpdateAndCheckDumb(action, event, false)` + 读 `event.getPresentation().isEnabled()`；
   执行用 `ActionUtil.invokeAction(action, dataContext, ActionPlaces.POPUP, null, null)`。
