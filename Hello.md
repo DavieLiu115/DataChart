@@ -152,3 +152,10 @@
 
 还有一些其他细节的地方就不多说了，大家去体验吧。
 
+
+
+### 地址
+
+[GitHub](https://github.com/DavieLiu115/DataChart)
+
+[插件地址](https://plugins.jetbrains.com/plugin/34597-datachart)
